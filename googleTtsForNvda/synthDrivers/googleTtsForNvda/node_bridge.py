@@ -90,7 +90,17 @@ NODE_PATH_ENV_VAR = "GTTS_NODE_PATH"
 NODE_EXECUTABLE_NAMES = ("node.exe", "node")
 # Placeholder handed to NodeClient.connect(); the bundled runtime has no WebSocket URL.
 BUNDLED_CONNECTION_URL = "bundled://googleTtsForNvda"
-STARTUP_GRACE_SECONDS = 2.0
+# How long start() waits to confirm the worker did not die immediately (bad
+# executable, missing engine files) before connect() takes over.
+#
+# This must stay short: it is a fail-fast window, not a readiness wait. connect()
+# is what actually waits for the worker's Runtime.ready line, and _reader_loop()
+# surfaces load errors as they arrive. The worker emits Runtime.ready about 80 ms
+# after spawn, so a long grace here is pure added latency on every single start --
+# the previous value of 2.0 cost roughly 1.9 s per start and bought nothing, because
+# the loop below has no early exit. 0.25 s is still ample for an exec failure or a
+# load error to surface, since both kill the process immediately.
+STARTUP_GRACE_SECONDS = 0.25
 READY_LINE_POLL_SECONDS = 0.01
 STOP_GRACE_SECONDS = 2.0
 STDIO_READ_POLL_SECONDS = 0.005

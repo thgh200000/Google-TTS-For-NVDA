@@ -178,6 +178,16 @@ class AdapterContractTests(unittest.TestCase):
         self.assertTrue(expected)
         self.assertEqual(expected, actual)
 
+    def test_startup_grace_is_short_because_it_is_only_a_fail_fast_window(self) -> None:
+        """Regression guard: the grace loop has no early exit, so its entire duration
+        is added to every runtime start. connect() waits for Runtime.ready separately
+        and _reader_loop() surfaces load errors, so this window only needs to catch an
+        instant exec failure. A previous value of 2.0 cost ~1.9 s per start for
+        nothing; measured runtime-ready dropped from 2010 ms to 259 ms at 0.25.
+        """
+        self.assertLessEqual(node_bridge.STARTUP_GRACE_SECONDS, 0.5)
+        self.assertGreater(node_bridge.STARTUP_GRACE_SECONDS, 0.0)
+
     def test_fallback_capability_flags(self) -> None:
         """BrowserProcessManager can retry with another candidate; the bundled one cannot."""
         self.assertTrue(bridge.BrowserProcessManager.supports_runtime_fallback)
