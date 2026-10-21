@@ -1,19 +1,19 @@
-"""Exercise the bundled Bun speech runtime end to end.
+"""Exercise the bundled Node speech runtime end to end.
 
 This is a manual checker, not part of ``python -m unittest discover``: it needs a
-Bun executable and a downloaded ``.zvoice`` voice package, so it cannot run in the
+Node executable and a downloaded ``.zvoice`` voice package, so it cannot run in the
 lint/type/test CI job. It exists because the unit tests stub the transport, and
 nothing else proves that the real chain works:
 
-    bridge.WasmTtsEngineBridge  ->  bun_bridge.BunClient  ->  subprocess stdin/stdout
-      ->  bunRuntime/worker.js  ->  bunRuntime/shim.js  ->  web/bridgeHarness.js
+    bridge.WasmTtsEngineBridge  ->  node_bridge.NodeClient  ->  subprocess stdin/stdout
+      ->  nodeRuntime/worker.js  ->  nodeRuntime/shim.js  ->  web/bridgeHarness.js
       ->  WasmTtsEngine/<version>/bindings_main.wasm
 
-Usage (Windows, from a built add-on or a source checkout with ``runtime/bun.exe``)::
+Usage (Windows, from a built add-on or a source checkout with ``runtime/node.exe``)::
 
-    python tests\\check_bun_runtime.py --zvoice path\\to\\en-us-x-multi.zvoice
+    python tests\\check_node_runtime.py --zvoice path\\to\\en-us-x-multi.zvoice
 
-Point ``GTTS_BUN_PATH`` at a Bun executable to override discovery, and
+Point ``GTTS_NODE_PATH`` at a Node executable to override discovery, and
 ``--package-id``/``--voice-name`` at a different installed voice. Pass ``--out`` to
 write the synthesised audio to a WAV file for listening.
 """
@@ -114,7 +114,7 @@ def _write_wav(path: Path, pcm: bytes, sampleRate: int) -> None:
 
 def run_check(args: argparse.Namespace) -> int:
     bridge = load_driver_module("bridge")
-    bun_bridge = load_driver_module("bun_bridge")
+    node_bridge = load_driver_module("node_bridge")
     audio_math = load_driver_module("audio_math")
     voice_store = load_driver_module("voice_store")
 
@@ -122,12 +122,12 @@ def run_check(args: argparse.Namespace) -> int:
     if not source.is_file():
         raise SystemExit(f"Voice package not found: {source}")
 
-    bunPath = bun_bridge.find_bun()
-    print(f"Bun executable      : {bunPath or 'NOT FOUND'}")
+    bunPath = node_bridge.find_node()
+    print(f"Node executable      : {bunPath or 'NOT FOUND'}")
     if bunPath is None:
         print(
-            "No Bun executable was found. Build the add-on (which downloads it), or set "
-            f"{bun_bridge.BUN_PATH_ENV_VAR} to a Bun executable.",
+            "No Node executable was found. Build the add-on (which downloads it), or set "
+            f"{node_bridge.NODE_PATH_ENV_VAR} to a Node executable.",
         )
         return 2
 
@@ -142,8 +142,8 @@ def run_check(args: argparse.Namespace) -> int:
     speaker = _find_speaker(catalog, args.package_id, args.voice_name)
     print(f"Speaker             : {speaker.name} ({speaker.id}, {speaker.language})")
 
-    manager = bun_bridge.BunProcessManager(catalog)
-    client = bun_bridge.BunClient(manager)
+    manager = node_bridge.NodeProcessManager(catalog)
+    client = node_bridge.NodeClient(manager)
     engine = bridge.WasmTtsEngineBridge(client, catalog)
 
     startedAt = time.perf_counter()

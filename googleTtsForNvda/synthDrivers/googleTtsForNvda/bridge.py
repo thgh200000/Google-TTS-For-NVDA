@@ -83,27 +83,34 @@ CONFIG_KEEP_BROWSER_RUNTIME_READY = "keepBrowserRuntimeReady"
 BROWSER_RUNTIME_EDGE = "edge"
 BROWSER_RUNTIME_CHROME = "chrome"
 BROWSER_RUNTIME_BRAVE = "brave"
-# The bundled Bun executable that hosts the WASM engine, selectable alongside the
-# three Chromium browsers. It is the default, so no browser install is required.
-BROWSER_RUNTIME_BUN = "bun"
-DEFAULT_BROWSER_RUNTIME = BROWSER_RUNTIME_BUN
-BUN_PATH_ENV_VAR = "GTTS_BUN_PATH"
+# The bundled Node.js executable that hosts the WASM engine, selectable alongside
+# the three Chromium browsers. It is the default, so no browser install is required.
+# The config value is host-neutral ("bundled" rather than "node") so the setting and
+# every saved profile survive a future change of JavaScript host.
+BROWSER_RUNTIME_BUNDLED = "bundled"
+DEFAULT_BROWSER_RUNTIME = BROWSER_RUNTIME_BUNDLED
+NODE_PATH_ENV_VAR = "GTTS_NODE_PATH"
 DEFAULT_AUTO_LANGUAGE_DETECTION = False
 DEFAULT_AUTO_LANGUAGE_PREFERRED = ""
 DEFAULT_AUTO_LANGUAGE_CANDIDATES = ""
 DEFAULT_AUTO_LANGUAGE_PROFILES = ""
 DEFAULT_KEEP_BROWSER_RUNTIME_READY = False
 BROWSER_RUNTIME_LABELS = {
-    BROWSER_RUNTIME_BUN: "Bundled runtime (no browser required)",
+    BROWSER_RUNTIME_BUNDLED: "Bundled runtime (no browser required)",
     BROWSER_RUNTIME_EDGE: "Microsoft Edge",
     BROWSER_RUNTIME_CHROME: "Google Chrome",
     BROWSER_RUNTIME_BRAVE: "Brave",
 }
 # Every selectable runtime. Browsers come first so the existing Chromium fallback
 # order (chrome -> edge -> brave) is preserved, with the bundled runtime appended.
-BROWSER_RUNTIMES = (BROWSER_RUNTIME_CHROME, BROWSER_RUNTIME_EDGE, BROWSER_RUNTIME_BRAVE, BROWSER_RUNTIME_BUN)
+BROWSER_RUNTIMES = (
+    BROWSER_RUNTIME_CHROME,
+    BROWSER_RUNTIME_EDGE,
+    BROWSER_RUNTIME_BRAVE,
+    BROWSER_RUNTIME_BUNDLED,
+)
 # The subset actually launched as a headless browser speaking CDP. The bundled
-# runtime is driven over stdin/stdout by bun_bridge instead, so it must never
+# runtime is driven over stdin/stdout by node_bridge instead, so it must never
 # reach BrowserProcessManager's launch path.
 CHROMIUM_RUNTIMES = (BROWSER_RUNTIME_CHROME, BROWSER_RUNTIME_EDGE, BROWSER_RUNTIME_BRAVE)
 
@@ -584,56 +591,56 @@ def set_keep_browser_runtime_ready(enabled: bool) -> bool:
     return enabled
 
 
-def bun_executable_path() -> str | None:
-    """Path to the bundled Bun runtime, or ``None`` when it is not installed."""
+def bundled_runtime_executable() -> str | None:
+    """Path to the bundled speech runtime executable, or ``None`` if it is not installed."""
     try:
-        from .bun_bridge import find_bun
+        from .node_bridge import find_node
     except Exception:
         log.debug("Google TTS bundled speech runtime module is unavailable.", exc_info=True)
         return None
     try:
-        return find_bun()
+        return find_node()
     except Exception:
         log.debug("Google TTS could not probe the bundled speech runtime.", exc_info=True)
         return None
 
 
-def bun_runtime_available() -> bool:
-    return bun_executable_path() is not None
+def bundled_runtime_available() -> bool:
+    return bundled_runtime_executable() is not None
 
 
 def effective_speech_runtime(runtime: str | None = None) -> str:
     """Resolve which host will actually run the engine.
 
     Falls back when the selected host is missing, so an unbuilt source checkout
-    (no ``runtime/bun.exe``) still works where a browser is installed, and a
+    (no ``runtime/node.exe``) still works where a browser is installed, and a
     machine without any browser still works from the bundled runtime.
     """
     selected = _normalize_browser_runtime(runtime or configured_browser_runtime())
-    if selected == BROWSER_RUNTIME_BUN:
-        if bun_runtime_available():
-            return BROWSER_RUNTIME_BUN
+    if selected == BROWSER_RUNTIME_BUNDLED:
+        if bundled_runtime_available():
+            return BROWSER_RUNTIME_BUNDLED
         choice = _find_browser_choice(None)
         if choice is not None:
             log.debug("Google TTS bundled speech runtime is missing; falling back to %s.", choice[0])
             return choice[0]
-        return BROWSER_RUNTIME_BUN
+        return BROWSER_RUNTIME_BUNDLED
     if browser_runtime_available(selected):
         return selected
     choice = _find_browser_choice(selected)
     if choice is not None:
         return choice[0]
-    if bun_runtime_available():
+    if bundled_runtime_available():
         log.debug("No Chromium browser runtime is available; falling back to the bundled speech runtime.")
-        return BROWSER_RUNTIME_BUN
+        return BROWSER_RUNTIME_BUNDLED
     return selected
 
 
 def speech_runtime_executable(runtime: str | None = None) -> str | None:
     """Executable path for the host that will actually run the engine."""
     effective = effective_speech_runtime(runtime)
-    if effective == BROWSER_RUNTIME_BUN:
-        return bun_executable_path()
+    if effective == BROWSER_RUNTIME_BUNDLED:
+        return bundled_runtime_executable()
     return browser_path_for_runtime(effective)
 
 
@@ -742,10 +749,10 @@ def _windows_is_64bit() -> bool:
     ``PROCESSOR_ARCHITEW6432`` to the real architecture, which is the reliable
     signal; ``PROCESSOR_ARCHITECTURE`` alone would report ``x86``.
 
-    The bundled Bun runtime has no 32-bit Windows build (its releases are x64 and
-    ARM64 only), so on 32-bit Windows ``bun.exe`` would exist on disk yet fail to
-    execute. Availability is gated here so ``effective_speech_runtime()`` falls back
-    to an installed Chromium browser instead of selecting a runtime that cannot run.
+    The add-on bundles the 64-bit Node build only, so on 32-bit Windows
+    ``node.exe`` would exist on disk yet fail to execute. Availability is gated
+    here so ``effective_speech_runtime()`` falls back to an installed Chromium
+    browser instead of selecting a runtime that cannot run.
     """
     if os.name != "nt":
         return True
@@ -755,19 +762,19 @@ def _windows_is_64bit() -> bool:
 
 def _browser_candidates(runtime: str) -> list[str]:
     runtime = _normalize_browser_runtime(runtime)
-    if runtime == BROWSER_RUNTIME_BUN:
+    if runtime == BROWSER_RUNTIME_BUNDLED:
         if not _windows_is_64bit():
-            # No 32-bit Bun build exists, so the bundled runtime cannot run here.
-            # Reporting no candidates makes browser_runtime_available("bun") False,
-            # which is what routes effective_speech_runtime() to a browser.
+            # Only the 64-bit Node build is bundled, so it cannot run here.
+            # Reporting no candidates makes browser_runtime_available("bundled")
+            # False, which is what routes effective_speech_runtime() to a browser.
             return []
         # Mirrors the CHROME_PATH / EDGE_PATH / BRAVE_PATH convention. The bundled
-        # copy lives in runtime/ next to the driver; bun_bridge.find_bun() adds the
+        # copy lives in runtime/ next to the driver; node_bridge.find_node() adds the
         # platform-specific executable names and a PATH lookup on top of these.
         return [
-            os.environ.get(BUN_PATH_ENV_VAR, ""),
-            str(BASE_DIR / "runtime" / "bun.exe"),
-            str(BASE_DIR / "runtime" / "bun"),
+            os.environ.get(NODE_PATH_ENV_VAR, ""),
+            str(BASE_DIR / "runtime" / "node.exe"),
+            str(BASE_DIR / "runtime" / "node"),
         ]
     if runtime == BROWSER_RUNTIME_EDGE:
         executableName = "msedge.exe"
@@ -840,7 +847,7 @@ def edge_webview2_available() -> bool:
 
 def browser_runtime_available(runtime: str | None = None) -> bool:
     if runtime is None:
-        return bun_runtime_available() or find_browser() is not None
+        return bundled_runtime_available() or find_browser() is not None
     normalized = str(runtime).strip().lower()
     if normalized not in BROWSER_RUNTIMES:
         return False
@@ -934,7 +941,7 @@ def edge_webview2_blocks_effective_runtime(runtime: str | None = None) -> bool:
     selectedRuntime = _normalize_browser_runtime(runtime or configured_browser_runtime())
     if edge_webview2_available():
         return False
-    if effective_speech_runtime(selectedRuntime) == BROWSER_RUNTIME_BUN:
+    if effective_speech_runtime(selectedRuntime) == BROWSER_RUNTIME_BUNDLED:
         # The bundled runtime does not need WebView2, and neither does any browser
         # it could fall back to, so a missing WebView2 Runtime is not fatal here.
         return False
@@ -2054,15 +2061,15 @@ class ChromeTtsBridge:
     def __init__(self, catalog: VoiceCatalog | None = None) -> None:
         self.catalog = catalog or VoiceCatalog.load()
         # Choosing the host here (rather than inside ensure_connection) keeps every
-        # other method generic: BunProcessManager/BunClient present the same
+        # other method generic: NodeProcessManager/NodeClient present the same
         # duck-typed surface as BrowserProcessManager/CdpClient, so
         # WasmTtsEngineBridge -- including speak() and handle_event() -- is shared.
         self._speechRuntime = effective_speech_runtime()
-        if self._speechRuntime == BROWSER_RUNTIME_BUN:
-            from .bun_bridge import BunClient, BunProcessManager
+        if self._speechRuntime == BROWSER_RUNTIME_BUNDLED:
+            from .node_bridge import NodeClient, NodeProcessManager
 
-            self._process_manager = BunProcessManager(self.catalog)
-            self._cdp_client = BunClient(self._process_manager)
+            self._process_manager = NodeProcessManager(self.catalog)
+            self._cdp_client = NodeClient(self._process_manager)
         else:
             self._process_manager = BrowserProcessManager(self.catalog)
             self._cdp_client = CdpClient()
@@ -2093,7 +2100,7 @@ class ChromeTtsBridge:
     def speech_runtime(self) -> str:
         """The resolved host this bridge drives; one of ``BROWSER_RUNTIMES``."""
         if not _process_manager_supports_fallback(self._process_manager):
-            return BROWSER_RUNTIME_BUN
+            return BROWSER_RUNTIME_BUNDLED
         return str(getattr(self, "_speechRuntime", configured_browser_runtime()))
 
     @property

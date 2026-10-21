@@ -1,40 +1,18 @@
-// worker.js — the long-lived Bun process that replaces headless Chromium.
+// node_worker.js — the long-lived Node process that replaces headless Chromium.
 //
-// This is the Bun counterpart of web/index.html. It loads, in order:
+// Load order matters:
+//   1. node_shim.js        — window/self, relative-URL fetch, in-memory indexedDB
+//   2. ../web/bridgeHarness.js — shared verbatim with the browser path
+//   3. engine_boot.js      — generated: bindings_main.js + offscreen_compiled.js
 //
-//   1. shim.js                 — the Bun host-API shims
-//   2. ../web/bridgeHarness.js — shared with the browser path
-//   3. engine_boot.js          — generated: bindings_main.js + offscreen_compiled.js
+// Protocol — one JSON object per line. stdout carries protocol JSON only; all
+// logging goes to stderr.
 //
-// Sharing bridgeHarness.js rather than porting it is deliberate: all of the audio
-// behaviour lives there (soft limiter and output gain, post-pitch resampling, WSOLA
-// tempo for artificial rate, segment boundary hold, adaptive packet sizing, session
-// token fencing, mark/segmentEnd/done event ordering). Duplicating it would risk the
-// two runtimes drifting apart, and tests/test_performance.py already asserts those
-// constants by reading web/bridgeHarness.js.
-//
-// The one thing this file configures is synthesisFinishedIdleMs, read by the harness
-// from globalThis.googleTtsForNvdaDrainIdleMs. It defaults to 80 ms when the global is
-// absent, so the browser path is numerically identical to before.
-//
-// Protocol — one JSON object per line.
-//
-// stdin (from Python):
-//   {"id":<int>,"op":"speak","payload":{...}}
-//   {"id":<int>,"op":"preload","payload":{...}}
-//   {"id":<int>,"op":"stop"}
-//   {"id":<int>,"op":"ready"}
-//
-// stdout (to Python). Only protocol JSON is ever written here; all logging goes to
-// stderr, because bridge.py's event parser expects CDP-shaped envelopes:
-//   {"method":"Runtime.ready"}
-//   {"method":"Runtime.bindingCalled","params":{"name":"googleTtsForNvdaBridge","payload":"<json>"}}
-//   {"id":<int>,"ok":true,"result":{...}}
-//   {"id":<int>,"ok":false,"error":"<message>"}
-//
-// The bindingCalled envelope is shaped exactly like the CDP event that
-// WasmTtsEngineBridge.handle_event() already parses, so that method is shared by
-// both runtimes without modification.
+//   stdin : {"id":<int>,"op":"speak"|"preload"|"stop"|"ready","payload":{...}}
+//           {"op":"stop"}                       (fire-and-forget, no id)
+//   stdout: {"method":"Runtime.ready","harnessReady":true}
+//           {"method":"Runtime.bindingCalled","params":{"name":...,"payload":"<json>"}}
+//           {"id":<int>,"ok":true,"result":{...}} | {"id":<int>,"ok":false,"error":"..."}
 "use strict";
 
 const path = require("node:path");
@@ -43,15 +21,10 @@ const BINDING_NAME = process.env.GTTS_BINDING_NAME || "googleTtsForNvdaBridge";
 const WEB_DIR = process.env.GTTS_WEB_DIR || "";
 const MAIN_ENTRY = process.env.GTTS_MAIN_ENTRY || "";
 const PREVIOUS_SPEAK_SETTLE_TIMEOUT_MS = Number(process.env.GTTS_SPEAK_SETTLE_TIMEOUT_MS) || 1000;
-// The Chromium renderer gets a dedicated, priority-elevated process; Bun shares one
-// event loop with the engine's WASM pthread pool, so the 80 ms drain idle the harness
-// defaults to can be exceeded mid-utterance and truncate speech. Raise it here, before
-// bridgeHarness.js is evaluated. Tunable so the trade-off can be measured on real
-// hardware: larger is safer against truncation, smaller returns from speak() sooner.
 const DRAIN_IDLE_MS = Number(process.env.GTTS_DRAIN_IDLE_MS) || 250;
 
 function log(...args) {
-	console.error("[bunRuntime]", ...args);
+	console.error("[nodeRuntime]", ...args);
 }
 
 function writeLine(object) {
@@ -67,12 +40,10 @@ function fail(id, error) {
 }
 
 // Audio accounting, so Python can prove whether a truncated utterance lost samples
-// in transport or never had them synthesised. jsAudioPackets/jsSamples count what
-// this side emitted; BunClient compares them with what handle_event() delivered.
+// in transport or never had them synthesised.
 const emitted = { packets: 0, samples: 0 };
 
-// The harness calls this instead of the CDP Runtime.addBinding function.
-globalThis[BINDING_NAME] = function googleTtsForNvdaBridge(payloadJson) {
+globalThis[BINDING_NAME] = function runtimeBridge(payloadJson) {
 	const text = String(payloadJson);
 	try {
 		const message = JSON.parse(text);
@@ -99,16 +70,14 @@ try {
 	if (!WEB_DIR || !MAIN_ENTRY) {
 		throw new Error("GTTS_WEB_DIR and GTTS_MAIN_ENTRY must be set");
 	}
-	// shim.js is loaded first so window/self, the Worker shim and the indexedDB
-	// stub exist before the engine evaluates.
 	require(path.join(__dirname, "shim.js"));
-	// Must be set before bridgeHarness.js reads it into a const.
+	// Must be set before bridgeHarness.js reads it into a const. See the harness
+	// comment on synthesisFinishedIdleMs: an idle gap in the engine's audio pump is
+	// the only completion criterion once an utterance has produced sound, so a host
+	// that shares one event loop with the WASM pthread pool needs more slack than a
+	// dedicated Chromium renderer does.
 	globalThis.googleTtsForNvdaDrainIdleMs = DRAIN_IDLE_MS;
-	// bridgeHarness.js installs window.AudioContext / AudioWorkletNode / chrome and
-	// the googleTtsForNvda* entry points. It must run before the engine so that
-	// `new AudioContext({sampleRate:24000})` inside the engine picks up the fake.
 	require(path.join(WEB_DIR, "bridgeHarness.js"));
-	// Generated bootstrap: Google's bindings_main.js + offscreen_compiled.js.
 	require(MAIN_ENTRY);
 } catch (error) {
 	loadError = error;
@@ -124,19 +93,10 @@ if (loadError) {
 }
 
 // bridgeHarness.js's googleTtsForNvdaSpeak() success tail fences every call with
-// sessionToken EXCEPT the final `await stopActiveSynthesis()`, which unconditionally
-// does currentSessionToken++, resetAudioQueue() and engine.onStop(). If a superseded
-// invocation is still unwinding when the next session has already called
-// beginSession(), that unfenced call lands inside the NEW session and truncates it
-// mid-utterance -- the tail of the sentence is simply never emitted.
-//
-// The browser path narrows this window because its CDP stop expression really does
-// run at cancel time. Here we close it structurally instead: never let two
-// invocations overlap. engine.onSpeak() resolves as soon as buffered synthesis is
-// kicked off (the audio is pumped by later setTimeout callbacks), and
-// waitForSynthesisComplete() returns immediately once `stopped` is set, so a
-// superseded invocation settles in a few microtasks and the bounded wait below is
-// effectively free.
+// sessionToken EXCEPT its final `await stopActiveSynthesis()`, which unconditionally
+// bumps the token, resets the audio queue and stops the engine. A superseded
+// invocation unwinding after the next session began would therefore truncate the NEW
+// utterance. Serialize so two invocations can never overlap.
 let activeSpeak = null;
 
 function settleWithBound(promise, milliseconds) {
@@ -190,16 +150,15 @@ async function speakExclusive(payload) {
 	}
 }
 
-const inflight = new Map();
-
-async function runOp(id, message) {
+async function runOp(message) {
 	const op = message.op;
 	const payload = message.payload || {};
 	if (!ready) {
-		throw new Error("Bun speech runtime failed to load the WASM TTS engine.");
+		throw new Error("Bundled speech runtime failed to load the WASM TTS engine.");
 	}
 	if (op === "ready") {
-		const isReady = typeof globalThis.googleTtsForNvdaReady === "function" && globalThis.googleTtsForNvdaReady() === true;
+		const isReady =
+			typeof globalThis.googleTtsForNvdaReady === "function" && globalThis.googleTtsForNvdaReady() === true;
 		return { ready: isReady };
 	}
 	if (op === "stop") {
@@ -217,6 +176,8 @@ async function runOp(id, message) {
 	throw new Error("Unknown operation: " + String(op));
 }
 
+const inflight = new Map();
+
 function dispatch(line) {
 	let message;
 	try {
@@ -227,11 +188,9 @@ function dispatch(line) {
 	}
 	const id = message.id;
 	if (id === undefined || id === null) {
-		// Fire-and-forget command from BunClient.send_command_async(), which is how
-		// WasmTtsEngineBridge.send_fast_stop() cancels speech. These used to be
-		// dropped here, so cancellation never reached the engine and the cancelled
-		// utterance stayed in flight -- which is what allowed the race above.
-		runOp(null, message).catch((error) => {
+		// Fire-and-forget command from send_command_async(), which is how
+		// send_fast_stop() cancels speech. These must not be dropped.
+		runOp(message).catch((error) => {
 			log("fire-and-forget command failed:", (error && error.message) || String(error));
 		});
 		return;
@@ -241,7 +200,7 @@ function dispatch(line) {
 		return;
 	}
 	inflight.set(id, true);
-	runOp(id, message).then(
+	runOp(message).then(
 		(result) => {
 			inflight.delete(id);
 			writeLine({ id, ok: true, result: result === undefined ? null : result });

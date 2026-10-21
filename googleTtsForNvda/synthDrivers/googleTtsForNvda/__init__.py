@@ -35,7 +35,7 @@ from synthDriverHandler import VoiceInfo, synthDoneSpeaking, synthIndexReached
 
 from . import audio_math, language_detector, language_utils, standby, voice_store
 from .bridge import (
-    BROWSER_RUNTIME_BUN,
+    BROWSER_RUNTIME_BUNDLED,
     CONFIG_AUTO_LANGUAGE_CANDIDATES,
     CONFIG_AUTO_LANGUAGE_DETECTION,
     CONFIG_AUTO_LANGUAGE_PREFERRED,
@@ -278,12 +278,12 @@ class SynthDriver(synthDriverHandler.SynthDriver):
                 )
             )
         if ChromeTtsBridge.speech_runtime_executable() is None:
-            if configured_browser_runtime() == BROWSER_RUNTIME_BUN:
-                wx.CallAfter(self._show_missing_bun_error)
+            if configured_browser_runtime() == BROWSER_RUNTIME_BUNDLED:
+                wx.CallAfter(self._show_missing_bundled_runtime_error)
                 raise RuntimeError(
                     _(
                         "The bundled Google TTS speech runtime was not found. "
-                        "Reinstall Google TTS For NVDA, or set GTTS_BUN_PATH to a Bun executable."
+                        "Reinstall Google TTS For NVDA, or set GTTS_NODE_PATH to a Node.js executable."
                     )
                 )
             wx.CallAfter(self._show_missing_chrome_error)
@@ -454,10 +454,10 @@ class SynthDriver(synthDriverHandler.SynthDriver):
             )
         )
 
-    def _show_missing_bun_error(self) -> None:
+    def _show_missing_bundled_runtime_error(self) -> None:
         self._show_runtime_error_message(
             _(
-                "The bundled Google TTS speech runtime was not found. Reinstall Google TTS For NVDA, or set GTTS_BUN_PATH to a Bun executable."
+                "The bundled Google TTS speech runtime was not found. Reinstall Google TTS For NVDA, or set GTTS_NODE_PATH to a Node.js executable."
             )
         )
 

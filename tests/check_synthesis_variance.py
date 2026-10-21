@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     bridge = load_driver_module("bridge")
-    bun_bridge = load_driver_module("bun_bridge")
+    node_bridge = load_driver_module("node_bridge")
     audio_math = load_driver_module("audio_math")
     voice_store = load_driver_module("voice_store")
 
@@ -77,8 +77,8 @@ def main(argv: list[str] | None = None) -> int:
         volume=100,
     )
 
-    manager = bun_bridge.BunProcessManager(catalog)
-    client = bun_bridge.BunClient(manager)
+    manager = node_bridge.NodeProcessManager(catalog)
+    client = node_bridge.NodeClient(manager)
     engine = bridge.WasmTtsEngineBridge(client, catalog)
     client.connect(manager.start_and_get_websocket_url())
     engine.enable_cdp_domains()

@@ -14,8 +14,8 @@ GLOBAL_PLUGIN_DIR = ROOT / "googleTtsForNvda" / "globalPlugins" / "googleTtsForN
 DRIVER_INTERNAL_MODULES = {
     "audio_math",
     "bridge",
-    "bun_bootstrap",
-    "bun_bridge",
+    "node_bootstrap",
+    "node_bridge",
     "catalog",
     "language_detector",
     "language_profiles",

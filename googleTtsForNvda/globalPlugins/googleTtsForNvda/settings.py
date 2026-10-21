@@ -207,7 +207,9 @@ class GoogleTtsSettingsPanel(SettingsPanel):
         # Bundled runtime first: it is the default and needs nothing installed.
         # dict.fromkeys dedupes without depending on where the bundled runtime
         # sits in BROWSER_RUNTIMES.
-        self._runtimeValues = list(dict.fromkeys((browserBridge.BROWSER_RUNTIME_BUN, *browserBridge.BROWSER_RUNTIMES)))
+        self._runtimeValues = list(
+            dict.fromkeys((browserBridge.BROWSER_RUNTIME_BUNDLEDDLED, *browserBridge.BROWSER_RUNTIMES))
+        )
         self._refresh_runtime_snapshot()
         self._savedRuntime = self._runtimeSnapshot["selectedRuntime"]
         self._savedKeepBrowserRuntimeReady = _configured_keep_browser_runtime_ready()
@@ -554,7 +556,7 @@ class GoogleTtsSettingsPanel(SettingsPanel):
         selectedExecutableStatus = (
             _("found") if self._browserExecutableAvailability.get(selectedRuntime, False) else _("not found")
         )
-        if selectedRuntime == browserBridge.BROWSER_RUNTIME_BUN:
+        if selectedRuntime == browserBridge.BROWSER_RUNTIME_BUNDLEDDLED:
             selectedMessage = _("Selected speech runtime: {runtime}. Bundled runtime: {browserStatus}.").format(
                 runtime=selectedLabel, browserStatus=selectedExecutableStatus
             )

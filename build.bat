@@ -79,37 +79,37 @@ if errorlevel 1 (
     set "EXIT_CODE=1"
     goto cleanup_and_exit
 )
-node --check googleTtsForNvda\synthDrivers\googleTtsForNvda\bunRuntime\shim.js
+node --check googleTtsForNvda\synthDrivers\googleTtsForNvda\nodeRuntime\shim.js
 if errorlevel 1 (
-    echo [ERROR] JavaScript syntax check failed: bunRuntime\shim.js
+    echo [ERROR] JavaScript syntax check failed: nodeRuntime\shim.js
     set "EXIT_CODE=1"
     goto cleanup_and_exit
 )
-node --check googleTtsForNvda\synthDrivers\googleTtsForNvda\bunRuntime\worker.js
+node --check googleTtsForNvda\synthDrivers\googleTtsForNvda\nodeRuntime\worker.js
 if errorlevel 1 (
-    echo [ERROR] JavaScript syntax check failed: bunRuntime\worker.js
+    echo [ERROR] JavaScript syntax check failed: nodeRuntime\worker.js
     set "EXIT_CODE=1"
     goto cleanup_and_exit
 )
 echo       Passed.
 echo.
 
-:: --------------- Bundle the Bun speech runtime ---------------
-:: The add-on runs Google's WASM TTS engine inside a bundled Bun executable rather
-:: than a headless Chromium browser, so bun.exe has to ship inside the .nvda-addon.
-:: fetch_bun_runtime.py is shared with build.sh and the GitHub Actions build so the
+:: --------------- Bundle the Node speech runtime ---------------
+:: The add-on runs Google's WASM TTS engine inside a bundled Node executable rather
+:: than a headless Chromium browser, so node.exe has to ship inside the .nvda-addon.
+:: fetch_node_runtime.py is shared with build.sh and the GitHub Actions build so the
 :: three cannot drift.
-echo [5/8] Bundling the Bun speech runtime...
-if "%SKIP_BUN_RUNTIME%"=="1" (
-    echo       Skipped due to SKIP_BUN_RUNTIME=1.
+echo [5/8] Bundling the Node speech runtime...
+if "%SKIP_NODE_RUNTIME%"=="1" (
+    echo       Skipped due to SKIP_NODE_RUNTIME=1.
 ) else (
-    if defined BUN_RUNTIME_URL (
-        python fetch_bun_runtime.py --url "%BUN_RUNTIME_URL%"
+    if defined NODE_RUNTIME_URL (
+        python fetch_node_runtime.py --url "%NODE_RUNTIME_URL%"
     ) else (
-        python fetch_bun_runtime.py
+        python fetch_node_runtime.py
     )
     if errorlevel 1 (
-        echo [ERROR] Could not bundle the Bun speech runtime.
+        echo [ERROR] Could not bundle the Node speech runtime.
         set "EXIT_CODE=1"
         goto cleanup_and_exit
     )

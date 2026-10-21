@@ -1,16 +1,18 @@
-# Packages the .nvda-addon, bundling the Bun speech runtime that replaces the
+# Packages the .nvda-addon, bundling the Node speech runtime that replaces the
 # headless Chromium browser.
 #
-# The add-on drives Google's WASM TTS engine through a bundled bun.exe (see
-# googleTtsForNvda/synthDrivers/googleTtsForNvda/bun_bridge.py), so the runtime has
-# to be inside the shipped archive. fetch_bun_runtime.py performs the download,
+# The add-on drives Google's WASM TTS engine through a bundled node.exe (see
+# googleTtsForNvda/synthDrivers/googleTtsForNvda/node_bridge.py), so the runtime has
+# to be inside the shipped archive. fetch_node_runtime.py performs the download,
 # extraction, executable discovery and placement; it is the same implementation
 # build.bat and build.sh call, so CI and local builds cannot drift.
 #
-# The Bun release archive contains a single executable nested in a top-level
-# folder (bun-windows-x64/bun.exe). That folder name follows the platform triple
-# rather than a documented stable contract, so the executable is located by a
-# recursive search for "bun.exe" instead of a hardcoded path.
+# The Node.js distribution archive is a full runtime layout (node.exe plus npm,
+# corepack, headers and docs) nested in a versioned folder, e.g.
+# node-v22.23.3-win-x64/node.exe. Only node.exe is packaged. That folder name
+# tracks the version rather than being a documented stable contract, so the
+# executable is located by a recursive search instead of a hardcoded path, and the
+# archive is verified against the SHASUMS256.txt Node publishes beside each release.
 
 name: Build add-on
 
@@ -21,10 +23,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      bun_url:
-        description: "Bun release archive URL to bundle"
+      node_version:
+        description: "Node.js version to bundle (must exist on nodejs.org/dist)"
         required: false
-        default: "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64.zip"
+        default: "v22.23.3"
 
 permissions:
   # `write` is only needed by the tag-gated "Create release" step at the end.
@@ -35,7 +37,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUN_URL: ${{ github.event.inputs.bun_url || 'https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64.zip' }}
+  # fetch_node_runtime.py pins this by default; the dispatch input only overrides it.
+  # Passing --version (rather than --url) keeps the SHASUMS256.txt verification on.
+  NODE_VERSION: ${{ github.event.inputs.node_version || 'v22.23.3' }}
   ADDON_RUNTIME_DIR: googleTtsForNvda/synthDrivers/googleTtsForNvda/runtime
 
 jobs:
@@ -55,15 +59,17 @@ jobs:
           node --version
 
       # ---------------------------------------------------------------------
-      # Download the Bun release archive, extract it, find bun.exe and copy it
-      # into the add-on payload where bun_bridge.find_bun() looks for it.
+      # Download the pinned Node.js release archive from nodejs.org, verify it
+      # against the SHASUMS256.txt published beside it, extract it, locate
+      # node.exe by recursive search (the archive nests it in a versioned folder)
+      # and copy it into the add-on payload where node_bridge.find_node() looks.
       # ---------------------------------------------------------------------
-      - name: Download and bundle the Bun speech runtime
-        run: python fetch_bun_runtime.py --url "$env:BUN_URL"
+      - name: Download and bundle the Node.js speech runtime
+        run: python fetch_node_runtime.py --version "$env:NODE_VERSION"
 
-      - name: Verify bun.exe was placed in the add-on payload
+      - name: Verify node.exe was placed in the add-on payload
         run: |
-          $exe = Join-Path "$env:ADDON_RUNTIME_DIR" "bun.exe"
+          $exe = Join-Path "$env:ADDON_RUNTIME_DIR" "node.exe"
           if (-not (Test-Path $exe)) { throw "Missing $exe" }
           $bytes = [System.IO.File]::ReadAllBytes($exe)[0..1]
           if ([System.Text.Encoding]::ASCII.GetString($bytes) -ne "MZ") { throw "$exe is not a PE executable" }
@@ -71,14 +77,14 @@ jobs:
           Write-Host "Found $exe ($size bytes)"
           if ($size -lt 20MB) { throw "$exe is suspiciously small ($size bytes)" }
           & $exe --version
-          Get-Content (Join-Path "$env:ADDON_RUNTIME_DIR" "bun_version.json")
+          Get-Content (Join-Path "$env:ADDON_RUNTIME_DIR" "node_version.json")
 
       # ---------------------------------------------------------------------
-      # Package. SKIP_BUN_RUNTIME=1 because the step above already bundled it.
+      # Package. SKIP_NODE_RUNTIME=1 because the step above already bundled it.
       # ---------------------------------------------------------------------
       - name: Build the add-on package
         env:
-          SKIP_BUN_RUNTIME: "1"
+          SKIP_NODE_RUNTIME: "1"
         run: ./build.bat
 
       - name: Verify the runtime is inside the .nvda-addon
@@ -92,12 +98,12 @@ jobs:
             $names = $zip.Entries | ForEach-Object { $_.FullName }
             foreach ($required in @(
               "manifest.ini",
-              "synthDrivers/googleTtsForNvda/runtime/bun.exe",
-              "synthDrivers/googleTtsForNvda/bun_bridge.py",
-              "synthDrivers/googleTtsForNvda/bun_bootstrap.py",
-              "synthDrivers/googleTtsForNvda/bunRuntime/shim.js",
-              "synthDrivers/googleTtsForNvda/bunRuntime/worker.js",
-              "synthDrivers/googleTtsForNvda/bunRuntime/LICENSE-bun.txt",
+              "synthDrivers/googleTtsForNvda/runtime/node.exe",
+              "synthDrivers/googleTtsForNvda/node_bridge.py",
+              "synthDrivers/googleTtsForNvda/node_bootstrap.py",
+              "synthDrivers/googleTtsForNvda/nodeRuntime/shim.js",
+              "synthDrivers/googleTtsForNvda/nodeRuntime/worker.js",
+              "synthDrivers/googleTtsForNvda/nodeRuntime/LICENSE-node.txt",
               "synthDrivers/googleTtsForNvda/web/bridgeHarness.js",
               "synthDrivers/googleTtsForNvda/WasmTtsEngine/20260917.1/bindings_main.wasm"
             )) {

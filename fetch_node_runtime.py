@@ -1,27 +1,37 @@
-"""Download the Bun runtime and place ``bun.exe`` inside the add-on package.
+"""Download the Node.js runtime and place ``node.exe`` inside the add-on package.
 
 One implementation shared by ``build.bat``, ``build.sh`` and the GitHub Actions
 build workflow, so the three cannot drift.
 
-The add-on drives Google's WASM TTS engine through a bundled Bun executable
+The add-on drives Google's WASM TTS engine through a bundled Node.js executable
 instead of a headless Chromium browser (see
-``googleTtsForNvda/synthDrivers/googleTtsForNvda/bun_bridge.py``), so the runtime
-has to ship inside the ``.nvda-addon``. Bun publishes per-platform archives as
-release assets; the Windows x64 one contains a single ``bun.exe`` nested in a
-top-level folder::
+``googleTtsForNvda/synthDrivers/googleTtsForNvda/node_bridge.py``), so the runtime
+has to ship inside the ``.nvda-addon``. Node publishes per-platform archives; the
+Windows x64 one is a full distribution whose executable sits at the top level of a
+versioned folder::
 
-    bun-windows-x64/
-    bun-windows-x64/bun.exe
+    node-v22.23.3-win-x64/
+    node-v22.23.3-win-x64/node.exe
+    node-v22.23.3-win-x64/LICENSE
+    ... npm, corepack, headers, docs ...
 
-Because that folder name has historically tracked the platform triple rather than
-being a stable contract, the executable is located by a recursive search for the
-expected file name instead of a hardcoded path.
+Only ``node.exe`` is packaged. Because that folder name tracks the version rather
+than being a stable contract, the executable is located by a recursive search for
+the expected file name instead of a hardcoded path.
+
+The version is **pinned** and the downloaded archive is verified against the
+``SHASUMS256.txt`` that Node publishes alongside it, so a build is reproducible and
+a tampered or truncated download is rejected rather than packaged.
+
+Why v22: it is an LTS release, and the last LTS line for which Node still publishes
+a 32-bit Windows build (``win-x86``), which matters if 32-bit Windows support is
+ever pursued. Node 24 and later dropped ``win-x86``.
 
 Usage::
 
-    python fetch_bun_runtime.py
-    python fetch_bun_runtime.py --dest path/to/runtime --url https://.../bun-windows-x64.zip
-    python fetch_bun_runtime.py --print-dest        # for build scripts
+    python fetch_node_runtime.py
+    python fetch_node_runtime.py --dest path/to/runtime --version v22.23.3
+    python fetch_node_runtime.py --print-dest        # for build scripts
 """
 
 from __future__ import annotations
@@ -43,20 +53,34 @@ REPO_ROOT = Path(__file__).resolve().parent
 ADDON_ROOT = REPO_ROOT / "googleTtsForNvda"
 DRIVER_DIR = ADDON_ROOT / "synthDrivers" / "googleTtsForNvda"
 
-DEFAULT_URL = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64.zip"
+DEFAULT_VERSION = "v22.23.3"
+DIST_BASE = "https://nodejs.org/dist"
 # NVDA is Windows-only, and the add-on ships a single runtime binary.
-EXECUTABLE_NAME = "bun.exe"
+DEFAULT_ARCH = "x64"
+EXECUTABLE_NAME = "node.exe"
 # Guard against a truncated download or an HTML error page being packaged.
 MINIMUM_EXECUTABLE_BYTES = 20 * 1024 * 1024
 PE_MAGIC = b"MZ"
-VERSION_FILE_NAME = "bun_version.json"
+VERSION_FILE_NAME = "node_version.json"
 USER_AGENT = "GoogleTtsForNvda-Build/1.0"
 CHUNK_BYTES = 1024 * 1024
 
 
 def default_destination() -> Path:
-    """Where the add-on expects the runtime, matching ``bun_bridge.RUNTIME_DIR``."""
+    """Where the add-on expects the runtime, matching ``node_bridge.RUNTIME_DIR``."""
     return DRIVER_DIR / "runtime"
+
+
+def archive_name(version: str = DEFAULT_VERSION, arch: str = DEFAULT_ARCH) -> str:
+    return f"node-{version}-win-{arch}.zip"
+
+
+def archive_url(version: str = DEFAULT_VERSION, arch: str = DEFAULT_ARCH) -> str:
+    return f"{DIST_BASE}/{version}/{archive_name(version, arch)}"
+
+
+def shasums_url(version: str = DEFAULT_VERSION) -> str:
+    return f"{DIST_BASE}/{version}/SHASUMS256.txt"
 
 
 def is_pe_executable(path: Path) -> bool:
@@ -68,12 +92,11 @@ def is_pe_executable(path: Path) -> bool:
         return False
 
 
-def find_bun_executable(root: Path, executableName: str = EXECUTABLE_NAME) -> Path | None:
+def find_node_executable(root: Path, executableName: str = EXECUTABLE_NAME) -> Path | None:
     """Recursively locate the runtime executable inside an extracted archive.
 
-    Prefers the shallowest match, and among equally shallow matches the one whose
-    name matches exactly, so a stray ``bun`` shell script cannot win over
-    ``bun.exe``.
+    Prefers the shallowest match, so the top-level ``node.exe`` wins over anything
+    nested inside ``node_modules``.
     """
     if not root.is_dir():
         return None
@@ -91,7 +114,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download(url: str, destination: Path, *, timeout: int = 300) -> Path:
+def download(url: str, destination: Path, *, timeout: int = 600) -> Path:
     """Download ``url`` to ``destination``, streaming to a temporary file first."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     handle, temporaryName = tempfile.mkstemp(dir=str(destination.parent), suffix=".download")
@@ -109,6 +132,21 @@ def download(url: str, destination: Path, *, timeout: int = 300) -> Path:
     return destination
 
 
+def expected_archive_sha256(version: str, archiveName: str) -> str | None:
+    """Read the checksum Node publishes for this archive, if it can be fetched."""
+    try:
+        request = urllib.request.Request(shasums_url(version), headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=120) as response:
+            text = response.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    for line in text.splitlines():
+        digest, _, name = line.partition("  ")
+        if name.strip() == archiveName:
+            return digest.strip().lower()
+    return None
+
+
 def extract_archive(archive: Path, targetDir: Path) -> Path:
     """Unzip ``archive`` into ``targetDir``, rejecting entries that escape it."""
     targetDir.mkdir(parents=True, exist_ok=True)
@@ -123,7 +161,7 @@ def extract_archive(archive: Path, targetDir: Path) -> Path:
 
 
 def probe_version(executable: Path) -> str:
-    """Best-effort ``bun --version``; only works when the host can run the binary."""
+    """Best-effort ``node --version``; only works when the host can run the binary."""
     try:
         import subprocess
 
@@ -143,13 +181,15 @@ def probe_version(executable: Path) -> str:
 
 def install(
     *,
-    url: str = DEFAULT_URL,
+    version: str = DEFAULT_VERSION,
+    arch: str = DEFAULT_ARCH,
+    url: str | None = None,
     destination: Path | None = None,
     cacheDir: Path | None = None,
     force: bool = False,
     quiet: bool = False,
 ) -> Path:
-    """Download, extract, verify and place ``bun.exe``. Returns the installed path."""
+    """Download, verify, extract and place ``node.exe``. Returns the installed path."""
 
     def say(message: str) -> None:
         if not quiet:
@@ -163,21 +203,38 @@ def install(
             return installed
         say(f"      Replacing invalid runtime at {installed}")
 
-    cache = Path(cacheDir) if cacheDir is not None else Path(tempfile.gettempdir()) / "googleTtsForNvda-bun-cache"
+    downloadUrl = url or archive_url(version, arch)
+    name = archive_name(version, arch) if url is None else downloadUrl.rstrip("/").rsplit("/", 1)[-1]
+    cache = Path(cacheDir) if cacheDir is not None else Path(tempfile.gettempdir()) / "googleTtsForNvda-node-cache"
     cache.mkdir(parents=True, exist_ok=True)
-    archive = cache / url.rstrip("/").rsplit("/", 1)[-1]
+    archive = cache / name
 
     if archive.is_file() and archive.stat().st_size > 0 and not force:
         say(f"      Using cached archive: {archive}")
     else:
-        say(f"      Downloading {url}")
-        download(url, archive)
+        say(f"      Downloading {downloadUrl}")
+        download(downloadUrl, archive)
         say(f"      Downloaded {archive.stat().st_size:,} bytes")
 
-    with tempfile.TemporaryDirectory(prefix="gtts-bun-") as stagingName:
+    # Verify against the checksum Node publishes next to the release.
+    if url is None:
+        expected = expected_archive_sha256(version, name)
+        actual = sha256(archive)
+        if expected is None:
+            say("      WARNING: could not fetch SHASUMS256.txt; skipped archive verification")
+        elif expected != actual:
+            archive.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Checksum mismatch for {name}: expected {expected}, got {actual}. "
+                "The cached archive was deleted; re-run the build."
+            )
+        else:
+            say(f"      Verified against SHASUMS256.txt: {actual}")
+
+    with tempfile.TemporaryDirectory(prefix="gtts-node-") as stagingName:
         staging = Path(stagingName)
         extract_archive(archive, staging)
-        found = find_bun_executable(staging)
+        found = find_node_executable(staging)
         if found is None:
             names = sorted({path.name for path in staging.rglob("*") if path.is_file()})[:20]
             raise RuntimeError(f"{EXECUTABLE_NAME} was not found inside {archive.name}. Archive contained: {names}")
@@ -193,21 +250,26 @@ def install(
         say(f"      Installed {installed} ({installed.stat().st_size:,} bytes)")
 
     metadata = {
-        "url": url,
+        "version": version,
+        "arch": arch,
+        "url": downloadUrl,
         "archiveSha256": sha256(archive),
         "executable": EXECUTABLE_NAME,
         "executableSha256": sha256(installed),
         "executableBytes": installed.stat().st_size,
-        "version": probe_version(installed),
+        "reportedVersion": probe_version(installed),
+        "license": "nodeRuntime/LICENSE-node.txt",
     }
     (destDir / VERSION_FILE_NAME).write_text(json.dumps(metadata, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    say(f"      Bun version: {metadata['version'] or 'unknown (host cannot execute a Windows binary)'}")
+    say(f"      Node version: {metadata['reportedVersion'] or 'unknown (host cannot execute a Windows binary)'}")
     return installed
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--url", default=DEFAULT_URL, help="Bun release archive URL (default: %(default)s).")
+    parser.add_argument("--version", default=DEFAULT_VERSION, help="Node.js version to bundle (default: %(default)s).")
+    parser.add_argument("--arch", default=DEFAULT_ARCH, choices=("x64", "x86", "arm64"), help="Windows architecture.")
+    parser.add_argument("--url", default=None, help="Override the archive URL entirely (skips checksum verification).")
     parser.add_argument(
         "--dest",
         default=None,
@@ -216,11 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cache-dir", default=None, help="Directory to cache the downloaded archive in.")
     parser.add_argument("--force", action="store_true", help="Re-download and re-extract even if already installed.")
     parser.add_argument("--quiet", action="store_true", help="Only report errors.")
-    parser.add_argument(
-        "--print-dest",
-        action="store_true",
-        help="Print the destination directory and exit without downloading.",
-    )
+    parser.add_argument("--print-dest", action="store_true", help="Print the destination directory and exit.")
     args = parser.parse_args(argv)
 
     if args.print_dest:
@@ -229,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         install(
+            version=args.version,
+            arch=args.arch,
             url=args.url,
             destination=Path(args.dest) if args.dest else None,
             cacheDir=Path(args.cache_dir) if args.cache_dir else None,
@@ -236,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             quiet=args.quiet,
         )
     except (urllib.error.URLError, RuntimeError, OSError, zipfile.BadZipFile) as error:
-        print(f"[ERROR] Could not install the Bun runtime: {error}", file=sys.stderr)
+        print(f"[ERROR] Could not install the Node.js runtime: {error}", file=sys.stderr)
         return 1
     return 0
 

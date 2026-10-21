@@ -87,8 +87,8 @@ echo
 echo "[4/8] Checking JavaScript syntax..."
 for jsFile in \
     googleTtsForNvda/synthDrivers/googleTtsForNvda/web/bridgeHarness.js \
-    googleTtsForNvda/synthDrivers/googleTtsForNvda/bunRuntime/shim.js \
-    googleTtsForNvda/synthDrivers/googleTtsForNvda/bunRuntime/worker.js; do
+    googleTtsForNvda/synthDrivers/googleTtsForNvda/nodeRuntime/shim.js \
+    googleTtsForNvda/synthDrivers/googleTtsForNvda/nodeRuntime/worker.js; do
     if ! node --check "$jsFile"; then
         echo "[ERROR] JavaScript syntax check failed: $jsFile"
         EXIT_CODE=1
@@ -98,18 +98,18 @@ done
 echo "      Passed."
 echo
 
-# --------------- Bundle the Bun speech runtime ---------------
-# The add-on runs Google's WASM TTS engine inside a bundled Bun executable rather
-# than a headless Chromium browser, so bun.exe has to ship inside the .nvda-addon.
-# fetch_bun_runtime.py is shared with build.bat and the GitHub Actions build so the
+# --------------- Bundle the Node speech runtime ---------------
+# The add-on runs Google's WASM TTS engine inside a bundled Node executable rather
+# than a headless Chromium browser, so node.exe has to ship inside the .nvda-addon.
+# fetch_node_runtime.py is shared with build.bat and the GitHub Actions build so the
 # three cannot drift. The Windows archive is fetched regardless of host OS, since
 # NVDA only runs on Windows.
-echo "[5/8] Bundling the Bun speech runtime..."
-if [ "${SKIP_BUN_RUNTIME:-0}" = "1" ]; then
-    echo "      Skipped (SKIP_BUN_RUNTIME=1)."
-elif ! python3 fetch_bun_runtime.py ${BUN_RUNTIME_URL:+--url "$BUN_RUNTIME_URL"}; then
-    echo "[ERROR] Could not bundle the Bun speech runtime."
-    echo "        Set SKIP_BUN_RUNTIME=1 to build without it, or BUN_RUNTIME_URL to override the download."
+echo "[5/8] Bundling the Node speech runtime..."
+if [ "${SKIP_NODE_RUNTIME:-0}" = "1" ]; then
+    echo "      Skipped (SKIP_NODE_RUNTIME=1)."
+elif ! python3 fetch_node_runtime.py ${NODE_RUNTIME_URL:+--url "$NODE_RUNTIME_URL"}; then
+    echo "[ERROR] Could not bundle the Node speech runtime."
+    echo "        Set SKIP_NODE_RUNTIME=1 to build without it, or NODE_RUNTIME_URL to override the download."
     EXIT_CODE=1
     exit "$EXIT_CODE"
 fi

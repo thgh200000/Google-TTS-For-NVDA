@@ -50,7 +50,7 @@ Version 1.0 marks a significant step in the project's maturity. With its own bun
 * **Diverse languages and voices:** Provides multiple Google TTS voice packages for supported languages with high-quality natural voices.
 * **Fast response and low latency:** Uses text segmentation and audio buffering to improve NVDA responsiveness.
 * **Google TTS Voice Manager:** Browse, download, remove, and inspect voice packages from an accessible dialog.
-* **Bundled speech runtime:** Google's WASM engine runs inside a Bun executable that ships with the add-on, so no browser installation is required.
+* **Bundled speech runtime:** Google's WASM engine runs inside a Node executable that ships with the add-on, so no browser installation is required.
 * **Four selectable speech runtimes:** The bundled runtime (default), Google Chrome, Microsoft Edge, or Brave, with automatic fallback if the selected runtime is unavailable.
 * **Automatic language profiles:** Optionally use per-language profiles so different languages can have their own voice and speech values.
 * **Built-in add-on updates:** Check for add-on updates directly from NVDA Settings, with an optional once-per-startup automatic check.
@@ -62,7 +62,7 @@ Version 1.0 marks a significant step in the project's maturity. With its own bun
 * **NVDA:** Version 2024.1 or newer. The add-on supports NVDA 2024 through 2026 on both 32-bit (x86) and 64-bit (x64) NVDA builds.
 * **Windows:** Windows 10 version 1809 or later, or Windows 11.
 * **Speech runtime:** The bundled runtime ships inside the add-on, so nothing else needs to be installed. It requires **64-bit Windows 10 version 1809 or later**, and needs a CPU supporting SSE4.2 (Intel Nehalem / 1st-gen Core or newer, AMD Bulldozer or newer). It is a separate 64-bit process, so it works under both 64-bit (x64) and 32-bit (x86) NVDA builds — NVDA's own bitness does not matter, only the operating system's.
-* **32-bit Windows:** Bun publishes no 32-bit Windows build, so the bundled runtime cannot run there. The add-on detects this and **automatically falls back to an installed Chromium browser** (Google Chrome, Microsoft Edge, or Brave); the settings panel shows the bundled runtime as Unavailable. Microsoft Edge additionally requires the Microsoft Edge WebView2 Runtime. If no browser is installed either, a Chromium browser must be installed on 32-bit Windows.
+* **32-bit Windows:** Node publishes no 32-bit Windows build, so the bundled runtime cannot run there. The add-on detects this and **automatically falls back to an installed Chromium browser** (Google Chrome, Microsoft Edge, or Brave); the settings panel shows the bundled runtime as Unavailable. Microsoft Edge additionally requires the Microsoft Edge WebView2 Runtime. If no browser is installed either, a Chromium browser must be installed on 32-bit Windows.
 * **Interactive Windows user session:** The add-on depends on a background speech runtime process. Do not rely on it where that process cannot start, such as the Windows sign-in screen, secure desktop contexts, Windows PE, recovery environments, or other minimal Windows sessions.
 
 ---
@@ -144,9 +144,9 @@ Under **NVDA Menu -> Preferences -> Settings -> Google TTS For NVDA**, you can c
 
 ### Custom Runtime Paths
 
-The bundled speech runtime ships inside the add-on at `synthDrivers\googleTtsForNvda\runtime\bun.exe` and normally needs no configuration. Two variables are available for troubleshooting:
+The bundled speech runtime ships inside the add-on at `synthDrivers\googleTtsForNvda\runtime\node.exe` and normally needs no configuration. Two variables are available for troubleshooting:
 
-* `GTTS_BUN_PATH` — full path to a Bun executable, to use your own copy instead (for example to test a newer Bun build).
+* `GTTS_NODE_PATH` — full path to a Node executable, to use your own copy instead (for example to test a newer Node build).
 * `GTTS_DRAIN_IDLE_MS` — how long the engine's audio pump may go quiet before an utterance is treated as finished. Defaults to `250` for the bundled runtime and `80` for a Chromium browser runtime. Raise it if the ends of sentences are ever cut off on a slow or heavily loaded machine; lower it if you want `speak()` to return sooner. Larger values are safer against truncation, smaller ones return faster.
 
 Google TTS For NVDA automatically discovers Google Chrome, Microsoft Edge, or Brave from standard Windows installation locations and the registry. If you use a portable browser, a custom installation folder, or an enterprise environment where the executable resides elsewhere, set one of these environment variables to the full executable path:
@@ -235,7 +235,7 @@ If Google TTS encounters profile conflicts (exit code 21 or 0), fails to initial
 ## Frequently Asked Questions
 
 ### Do I need to install a web browser?
-No. Since the bundled speech runtime was introduced, the add-on carries its own runtime and needs no browser at all — this is the default and the recommended setting. Google Chrome, Microsoft Edge, and Brave remain selectable in the **Speech runtime** setting if you would rather use a browser you already have, and the add-on falls back to one automatically if the bundled runtime is ever missing (for example, if antivirus removed `runtime\bun.exe`).
+No. Since the bundled speech runtime was introduced, the add-on carries its own runtime and needs no browser at all — this is the default and the recommended setting. Google Chrome, Microsoft Edge, and Brave remain selectable in the **Speech runtime** setting if you would rather use a browser you already have, and the add-on falls back to one automatically if the bundled runtime is ever missing (for example, if antivirus removed `runtime\node.exe`).
 
 ### Can Google TTS For NVDA work offline?
 Yes. After downloading your desired voice packages, the add-on generates speech locally on your computer through the bundled WASM TTS Engine running in the bundled speech runtime. An internet connection is only needed to download additional voice packages or add-on updates.
@@ -243,7 +243,7 @@ Yes. After downloading your desired voice packages, the add-on generates speech 
 ### Which speech runtimes are supported?
 The **Speech runtime** setting in the add-on settings category offers four choices:
 
-* **Bundled runtime (no browser required)** — the default. A Bun executable ships inside the add-on, so nothing else has to be installed.
+* **Bundled runtime (no browser required)** — the default. A Node executable ships inside the add-on, so nothing else has to be installed.
 * **Google Chrome**, **Microsoft Edge**, or **Brave** — headless Chromium browsers, if you prefer to use one you already have.
 
 The add-on automatically falls back to another available runtime if your chosen one cannot start.
@@ -276,7 +276,7 @@ Do not rely on it there. Google TTS For NVDA requires an interactive Windows use
 * **Eigen math library:** Apache License 2.0.
 * **Compact Language Detector 2 (CLD2):** Apache License 2.0.
 * **websocket-client:** Apache License 2.0.
-* **Bun runtime (`runtime\bun.exe`):** MIT License. Bun statically links JavaScriptCore, which is LGPL-2, so Bun's license text — including the relinking instructions LGPL-2 requires — is redistributed with the binary at `synthDrivers\googleTtsForNvda\bunRuntime\LICENSE-bun.txt`.
+* **Node.js runtime (`runtime\node.exe`):** MIT License. Node bundles V8 (BSD 3-Clause), libuv (MIT), OpenSSL (Apache 2.0), ICU (ICU License) and other permissively licensed components; it contains no LGPL or GPL component. The full notice, including every bundled component, is redistributed with the binary at `synthDrivers\googleTtsForNvda\nodeRuntime\LICENSE-node.txt`.
 * **Unicode Character Database (UCD):** Unicode License V3 (Unicode-3.0).
 * **Unicode Common Locale Data Repository (CLDR):** Unicode License V3 (Unicode-3.0).
 * **Voice packages (`.zvoice`):** Downloaded directly on demand from Google's official public speech CDN; not distributed within the add-on package.
@@ -288,25 +288,25 @@ Do not rely on it there. Google TTS For NVDA requires an interactive Windows use
 To package the add-on yourself:
 
 1. Clone this repository: `git clone https://github.com/nguyenanhduc09/Google-TTS-For-NVDA.git`
-2. Ensure **Python** and **Node.js** are installed on your computer. Internet access is needed once, to download the Bun runtime.
+2. Ensure **Python** and **Node.js** are installed on your computer. Internet access is needed once, to download the Node runtime.
 3. Run the automated build script:
 
 ```bat
 build.bat
 ```
 
-The build script reads the version from `googleTtsForNvda/manifest.ini`, verifies Python and JavaScript syntax, **downloads the Bun runtime and places `bun.exe` in `googleTtsForNvda/synthDrivers/googleTtsForNvda/runtime/`**, confirms no `.zvoice` packages are in the source tree, cleans cache folders, and packages the add-on into `dist/`.
+The build script reads the version from `googleTtsForNvda/manifest.ini`, verifies Python and JavaScript syntax, **downloads the Node runtime and places `node.exe` in `googleTtsForNvda/synthDrivers/googleTtsForNvda/runtime/`**, confirms no `.zvoice` packages are in the source tree, cleans cache folders, and packages the add-on into `dist/`.
 
-The Bun step is performed by `fetch_bun_runtime.py`, which downloads `bun-windows-x64.zip` from Bun's latest release, extracts it, locates `bun.exe` by recursive search, verifies it is a genuine Windows PE image, and records its version and SHA-256 in `runtime/bun_version.json`. The downloaded archive is cached, so repeat builds do not re-download it. Two environment variables alter this step:
+The Node step is performed by `fetch_node_runtime.py`, which downloads `node-v22.23.3-win-x64.zip` from Node's latest release, extracts it, locates `node.exe` by recursive search, verifies it is a genuine Windows PE image, and records its version and SHA-256 in `runtime/node_version.json`. The downloaded archive is cached, so repeat builds do not re-download it. Two environment variables alter this step:
 
-* `SKIP_BUN_RUNTIME=1` — build without downloading (the resulting add-on will fall back to a browser at runtime)
-* `BUN_RUNTIME_URL=<url>` — download from a different archive, for example to pin a specific Bun release
+* `SKIP_NODE_RUNTIME=1` — build without downloading (the resulting add-on will fall back to a browser at runtime)
+* `NODE_RUNTIME_URL=<url>` — download from a different archive, for example to pin a specific Node release
 
-`runtime/` is gitignored: `bun.exe` is a build input, never a tracked source file. Because of it the package is roughly 53 MB rather than 10 MB.
+`runtime/` is gitignored: `node.exe` is a build input, never a tracked source file. Because of it the package is roughly 53 MB rather than 10 MB.
 
 ### Continuous integration
 
-`.github/workflows/test.yml` runs linting, type checking, and the unit test suite on Python 3.11 and 3.12. `.github/workflows/build.yml` performs the same Bun download, builds the `.nvda-addon`, verifies that `bun.exe` and the other required files are actually inside the archive, uploads it as a build artifact, and publishes a GitHub Release when a `v*` tag is pushed.
+`.github/workflows/test.yml` runs linting, type checking, and the unit test suite on Python 3.11 and 3.12. `.github/workflows/build.yml` performs the same Node download, builds the `.nvda-addon`, verifies that `node.exe` and the other required files are actually inside the archive, uploads it as a build artifact, and publishes a GitHub Release when a `v*` tag is pushed.
 
 ---
 

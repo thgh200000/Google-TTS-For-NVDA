@@ -1,12 +1,12 @@
 r"""Stress-test the interrupt-then-respeak path for truncated speech.
 
 Kept as a manual checker (not collected by unittest discover) because it needs a
-Bun executable and a downloaded voice package.
+Node executable and a downloaded voice package.
 
 Mechanism (two defects compounding):
 
-1. `BunClient.send_command_async()` writes `{"op": "stop"}` with **no `id`**, and
-   `bunRuntime/worker.js`'s `dispatch()` returned early on a missing id -- so
+1. `NodeClient.send_command_async()` writes `{"op": "stop"}` with **no `id`**, and
+   `nodeRuntime/worker.js`'s `dispatch()` returned early on a missing id -- so
    `WasmTtsEngineBridge.send_fast_stop()` was silently dropped and the cancelled
    utterance kept running.
 2. `web/bridgeHarness.js`'s `googleTtsForNvdaSpeak()` success tail fences every
@@ -47,7 +47,7 @@ class _Pkg:
 
 def main() -> int:
     bridge = load_driver_module("bridge")
-    bun_bridge = load_driver_module("bun_bridge")
+    node_bridge = load_driver_module("node_bridge")
     audio_math = load_driver_module("audio_math")
     voice_store = load_driver_module("voice_store")
 
@@ -75,8 +75,8 @@ def main() -> int:
         volume=100,
     )
 
-    manager = bun_bridge.BunProcessManager(catalog)
-    client = bun_bridge.BunClient(manager)
+    manager = node_bridge.NodeProcessManager(catalog)
+    client = node_bridge.NodeClient(manager)
     engine = bridge.WasmTtsEngineBridge(client, catalog)
     client.connect(manager.start_and_get_websocket_url())
     engine.enable_cdp_domains()

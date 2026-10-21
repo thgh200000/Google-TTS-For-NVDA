@@ -15,11 +15,11 @@ Technical code map indexing the codebase architecture, modules, classes, functio
   - **synthDrivers/googleTtsForNvda/** — Synthesizer driver and runtime bridge
     - **__init__.py** — `SynthDriver` implementation, NVDA settings ring, speech loop, rate factor tables, audio cache
     - **audio_math.py** — Pure audio math, rate/pitch conversions, SeaNet rate protection, speech options builder
-    - **bridge.py** — `ChromeTtsBridge`, `BrowserProcessManager`, `CdpClient`, `CdpDispatcher`, HTTP server, browser lifecycle, runtime selection (`BROWSER_RUNTIME_BUN`, `CHROMIUM_RUNTIMES`, `effective_speech_runtime()`, `speech_runtime_executable()`, `bun_runtime_available()`)
-    - **bun_bridge.py** — Bundled Bun runtime: `BunProcessManager`, `BunClient`, `classify_expression()`, `find_bun()`/`bun_candidates()`. Presents the `BrowserProcessManager`/`CdpClient` duck-typed surface so `ChromeTtsBridge` and all of `WasmTtsEngineBridge` are shared with the browser path
-    - **bun_bootstrap.py** — `generate()`, `find_engine_global()`, `harness_probe_names()`: builds `engine_boot.js` + `pthread_worker.js` from the pristine engine sources into `<CONFIG>/googleTtsForNvda/runtime/bunBootstrap/`
-    - **bunRuntime/** — Bun host shims: `shim.js` (parentPort→`onmessage` bridge, `Worker` shim, in-memory `indexedDB`, relative-URL `fetch`), `worker.js` (stdin/stdout line protocol; reuses `../web/bridgeHarness.js` verbatim), `LICENSE-bun.txt` (Bun's MIT notice plus the LGPL-2 JavaScriptCore relinking instructions, redistributed because the add-on ships `bun.exe`)
-    - **runtime/** — Build-time output only (gitignored): `bun.exe` and `bun_version.json`, placed by `fetch_bun_runtime.py`
+    - **bridge.py** — `ChromeTtsBridge`, `BrowserProcessManager`, `CdpClient`, `CdpDispatcher`, HTTP server, browser lifecycle, runtime selection (`BROWSER_RUNTIME_BUNDLED`, `CHROMIUM_RUNTIMES`, `effective_speech_runtime()`, `speech_runtime_executable()`, `bundled_runtime_available()`)
+    - **node_bridge.py** — Bundled Node runtime: `NodeProcessManager`, `NodeClient`, `classify_expression()`, `find_node()`/`node_candidates()`. Presents the `BrowserProcessManager`/`CdpClient` duck-typed surface so `ChromeTtsBridge` and all of `WasmTtsEngineBridge` are shared with the browser path
+    - **node_bootstrap.py** — `generate()`, `find_engine_global()`, `harness_probe_names()`: builds the single `engine_boot.js` from the pristine engine sources into `<CONFIG>/googleTtsForNvda/runtime/nodeBootstrap/`. No pthread entry is generated; workers run the real `bindings_main.js`
+    - **nodeRuntime/** — Node host shims: `shim.js` (in-memory `indexedDB`, relative-URL `fetch`, `window`/`self` globals — and nothing else, because Node already satisfies Emscripten's `ENVIRONMENT_IS_NODE` path), `worker.js` (stdin/stdout line protocol; loads `../web/bridgeHarness.js` unchanged), `LICENSE-node.txt` (Node's full MIT notice and bundled-component licences, redistributed because the add-on ships `node.exe`)
+    - **runtime/** — Build-time output only (gitignored): `node.exe` and `node_version.json`, placed by `fetch_node_runtime.py`
     - **standby.py** — `_StandbyRuntimeManager`, background browser-runtime readiness and voice pre-warming manager
     - **watcher.py** — `DirectoryChangeWatcher`, kernel-blocked Win32 directory-change watcher
     - **catalog.py** — `VoiceCatalog`, `VoicePackage`, `Speaker` models, engine library integrity validation
@@ -30,7 +30,7 @@ Technical code map indexing the codebase architecture, modules, classes, functio
     - **speech_processing.py** — `TextSegmenter`, Unicode sentence boundary detection, `PcmSilenceShortener`, `PcmLeadBuffer`, grapheme/emoji cut protection
     - **unicode_data.py** — Pre-generated UCD 17.0 / CLDR 48.2 script/combining/currency/emoji ranges, units, Latin exemplars, sentence terminals, and normalization table
     - **voice_store.py** — Voice package download, copy, verify, remove, persistent verification cache
-    - **web/** — Bridge environment shared by both runtimes (`index.html` for Chromium; `bridgeHarness.js` is loaded directly by `bunRuntime/worker.js`, so all audio DSP, packet sizing and session fencing live in exactly one place)
+    - **web/** — Bridge environment shared by both runtimes (`index.html` for Chromium; `bridgeHarness.js` is loaded directly by `nodeRuntime/worker.js`, so all audio DSP, packet sizing and session fencing live in exactly one place)
     - **WasmTtsEngine/<ENGINE_VERSION>/** — Bundled Chromium WASM TTS engine runtime (`bindings_main.js/.wasm`, `background_compiled.js`, `offscreen.html`, `offscreen_compiled.js`, `manifest.json`, `wasm_tts_manifest_v3.json`, `voices.json`, `streaming_worklet_processor.js`, `_metadata/verified_contents.json`, licenses)
     - **websocketClientRepo/** — Vendored isolated `websocket-client` package (`websocket/`)
   - **globalPlugins/googleTtsForNvda/** — Global plugin integration and UI components
@@ -43,13 +43,13 @@ Technical code map indexing the codebase architecture, modules, classes, functio
   - **doc/** — Localized user documentation (`en/readme.html`, `<locale>/readme.html`)
   - **locale/** — Localized interface catalogs (`<locale>/LC_MESSAGES/nvda.po`, `nvda.mo`, `manifest.ini`, `languageSort.json`)
 - **.github/workflows/test.yml** — Continuous integration workflow (linting, type checking, unit tests)
-- **.github/workflows/build.yml** — Packaging workflow: bundles `bun.exe` from the official Bun release, builds the `.nvda-addon`, verifies the runtime is inside the archive, uploads the artifact, and publishes a release on version tags
+- **.github/workflows/build.yml** — Packaging workflow: bundles `node.exe` from the official Node release, builds the `.nvda-addon`, verifies the runtime is inside the archive, uploads the artifact, and publishes a release on version tags
 - **tests/** — Automated test suite, benchmarks, and contract checkers (see [tests/README.md](file:///c:/Users/hungv/Documents/Codex/Google-TTS-For-NVDA/tests/README.md))
 - **build.bat** / **build.sh** — Windows and POSIX build scripts (clean, lint, compile i18n/docs, package `.nvda-addon`)
 - **build_i18n.py** — Localization CLI tool (POT/PO extraction, merge, validation, Markdown/HTML doc generation)
 - **generate_voices_json.py** — Upstream voice catalog scraper and generator from ChromeOS/Google textproto
 - **generate_unicode_data.py** — UCD 17.0 and CLDR 48.2 data generator for `unicode_data.py`
-- **fetch_bun_runtime.py** — Downloads, extracts, verifies and installs the bundled Bun runtime (`bun.exe`) into the add-on payload; shared by `build.bat`, `build.sh` and `.github/workflows/build.yml`
+- **fetch_node_runtime.py** — Downloads, extracts, verifies and installs the bundled Node runtime (`node.exe`) into the add-on payload; shared by `build.bat`, `build.sh` and `.github/workflows/build.yml`
 - **make_update_manifest.py** — Release update manifest generator creating `stable.json` for internal updater
 - **AGENTS.md**, **CONTRIBUTING.md**, **TRANSLATING.md**, **UPDATER_RELEASE_GUIDE.md**, **readme.md** — Developer, localization, release, and user documentation
 - **mypy.ini**, **ruff.toml**, **.gitattributes**, **.gitignore**, **LICENSE** — Tooling, Git, and GPL-2.0 license configuration
@@ -70,10 +70,10 @@ Technical code map indexing the codebase architecture, modules, classes, functio
 | Runtime voices.json | `<CONFIG>/googleTtsForNvda/runtime/voices.json` | Dynamic JSON catalog served via local HTTP bridge (`bridge.py:BrowserProcessManager.start_server()`). |
 | NVDA configuration file | `<CONFIG>/nvda.ini` | Main NVDA config storing settings under `[googleTtsForNvda]` (`bridge.py:CONFIG_SECTION`). |
 | Voice dictionaries | `<CONFIG>/speechDicts/` | Per-voice pronunciation dictionaries (`globalPlugins/__init__.py:_load_voice_dictionary_for_voice()`). |
-| Bundled Bun executable | `<ADDON>/synthDrivers/googleTtsForNvda/runtime/bun.exe` | Build-time payload placed by `fetch_bun_runtime.py`; resolved by `bridge.bun_executable_path()` / `bun_bridge.find_bun()`, overridable with `GTTS_BUN_PATH`. |
+| Bundled Node executable | `<ADDON>/synthDrivers/googleTtsForNvda/runtime/node.exe` | Build-time payload placed by `fetch_node_runtime.py`; resolved by `bridge.bundled_runtime_executable()` / `node_bridge.find_node()`, overridable with `GTTS_NODE_PATH`. |
 | Browser persistent profiles | `<PROFILES_ROOT>/persistentSession/` | Isolated persistent browser user data directories (`bridge.py:BrowserProcessManager._browser_profile_root()`). |
 | Browser temporary profiles | `<PROFILES_ROOT>/session-<pid>-<timestamp>/` | Ephemeral sessions spawned when persistent profile is locked (`bridge.py:BrowserProcessManager._start_browser_choice()`). Chromium runtime only. |
-| Generated Bun bootstrap | `<CONFIG>/googleTtsForNvda/runtime/bunBootstrap/` | `engine_boot.js`, `pthread_worker.js`, `bootstrap_manifest.json`; regenerated only when an input hash changes (`bun_bootstrap.generate()`). |
+| Generated Node bootstrap | `<CONFIG>/googleTtsForNvda/runtime/nodeBootstrap/` | `engine_boot.js` and `bootstrap_manifest.json`; regenerated only when an input hash changes (`node_bootstrap.generate()`). No pthread entry is generated — Emscripten spawns the real `bindings_main.js`. |
 | Profile size tracker | `<PROFILES_ROOT>/profile_size_check.json` | 24-hour periodic profile size check tracker (`bridge.py:_persistent_profile_size_check_due()`). |
 | Updater download directory | `%TEMP%/googleTtsForNvda-updates/` | Staging folder for `stable.json` and `.nvda-addon` installers (`updater.py:_update_download_dir()`). |
 
@@ -83,13 +83,13 @@ Technical code map indexing the codebase architecture, modules, classes, functio
 
 1. NVDA calls `SynthDriver.speak()` with a sequence of text segments, pause commands, and speech parameters.
 2. The driver segments text for low-latency streaming, applies pause shortening, builds synthesis options (voice, rate, pitch, volume), and enqueues requests to a background thread.
-3. `ChromeTtsBridge.speak()` verifies the required voice package is installed, ensures the speech runtime is connected, then evaluates `window.googleTtsForNvdaSpeak(...)`. With the bundled runtime, `bun_bridge.BunClient.request()` translates that expression through `classify_expression()` into a `{"op":"speak","payload":...}` line on the worker's stdin; with a Chromium runtime it goes over CDP `Runtime.evaluate` instead.
+3. `ChromeTtsBridge.speak()` verifies the required voice package is installed, ensures the speech runtime is connected, then evaluates `window.googleTtsForNvdaSpeak(...)`. With the bundled runtime, `node_bridge.NodeClient.request()` translates that expression through `classify_expression()` into a `{"op":"speak","payload":...}` line on the worker's stdin; with a Chromium runtime it goes over CDP `Runtime.evaluate` instead.
 4. `bridgeHarness.js` — shared verbatim by both runtimes — passes text to the bundled Google WASM TTS engine (`onSpeak`), intercepts synthesized `AudioWorkletNode` buffers, applies gain makeup and clipping protection, converts Float32 audio to 16-bit PCM, and emits base64 PCM chunks through the `googleTtsForNvdaBridge` binding.
-5. Python receives the events as `Runtime.bindingCalled` envelopes (`bunRuntime/worker.js` writes exactly that shape to stdout; `CdpDispatcher` delivers it for the browser path), so the single `WasmTtsEngineBridge.handle_event()` decodes base64 PCM for both and feeds audio directly to `nvwave.WavePlayer` for output.
+5. Python receives the events as `Runtime.bindingCalled` envelopes (`nodeRuntime/worker.js` writes exactly that shape to stdout; `CdpDispatcher` delivers it for the browser path), so the single `WasmTtsEngineBridge.handle_event()` decodes base64 PCM for both and feeds audio directly to `nvwave.WavePlayer` for output.
 
-> **Bundled runtime host requirements.** Bun supplies no Web Audio, no DOM and no `indexedDB`, and — unlike Node — does not deliver `worker_threads` messages to `globalThis.onmessage`. `bunRuntime/shim.js` closes those gaps; see its header comment and `tests/test_bun_runtime.py` for the specific behaviours that are asserted.
+> **Bundled runtime host requirements.** Node supplies no Web Audio, no DOM and no `indexedDB`, and its `fetch()` cannot resolve the relative URLs the engine uses because there is no document base URL. `nodeRuntime/shim.js` closes exactly those gaps and nothing else; see its header comment and `tests/test_node_runtime.py` for the asserted behaviours. Everything Emscripten's `ENVIRONMENT_IS_NODE` path needs is already present in Node — `worker_threads.Worker` with `.on()`/`.unref()`, the `parentPort` → `globalThis.onmessage` bridge, and the `workerData === 'em-pthread'` self-boot test at the tail of `bindings_main.js` — which is why the pthread pool can run the **real, unmodified** `bindings_main.js` and no second generated entry file is needed.
 
-> **Redistribution obligation.** `runtime/bun.exe` is a third-party binary shipped inside the `.nvda-addon`. Bun is MIT and statically links LGPL-2 JavaScriptCore, whose terms require the relinking instructions to travel with the binary — that is what `bunRuntime/LICENSE-bun.txt` is for. `tests/test_bun_runtime.py` and the `build.yml` archive check both assert the file is present, so removing it fails CI rather than silently creating a license problem. Re-copy it from <https://github.com/oven-sh/bun/blob/main/LICENSE.md> when Bun is upgraded.
+> **Redistribution obligation.** `runtime/node.exe` is a third-party binary shipped inside the `.nvda-addon`. Node.js is MIT licensed and bundles V8 (BSD-3-Clause), libuv (MIT), OpenSSL (Apache-2.0), ICU (ICU License) and other permissively licensed components; there is **no LGPL or GPL component**, so there is no relinking obligation to satisfy. MIT still requires the notice to travel with the binary, which is what `nodeRuntime/LICENSE-node.txt` is for: Node's full 145 KB `LICENSE`, including every bundled-component notice, taken from the pinned `v22.23.3` tag. `fetch_node_runtime.py` additionally verifies the downloaded archive against the `SHASUMS256.txt` that Node publishes beside each release. `tests/test_node_runtime.py` and the `build.yml` archive check both assert the license file is present, so removing it fails CI rather than silently creating a licence problem. Re-copy it from <https://github.com/nodejs/node/blob/v22.23.3/LICENSE> when the pinned version changes.
 
 ---
 

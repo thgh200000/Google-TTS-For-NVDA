@@ -12,7 +12,7 @@ There are two workflows. Every push and every pull request triggers the **Tests*
 
 The **Tests** workflow runs on **Windows** (`windows-latest`) against two Python versions in parallel: **Python 3.11** and **Python 3.12**. Both must pass for a PR to be mergeable. It uses `fail-fast: false`, so if Python 3.11 fails, 3.12 still finishes running — you'll see all failures at once instead of having to fix them one at a time. It also uses `concurrency` with `cancel-in-progress: true` to automatically cancel obsolete in-flight runs when new commits are pushed.
 
-The **Build add-on** workflow packages a real `.nvda-addon` and uploads it as a build artifact, so every push produces something installable. It downloads the Bun runtime, runs `build.bat`, then reopens the finished archive and asserts that `manifest.ini`, `runtime/bun.exe`, the driver modules and the WASM engine are actually inside it and that no `.zvoice` leaked in. On a `v*` tag it also publishes a GitHub Release, which is why it needs `permissions: contents: write`; the Tests workflow stays read-only.
+The **Build add-on** workflow packages a real `.nvda-addon` and uploads it as a build artifact, so every push produces something installable. It downloads the Node runtime, runs `build.bat`, then reopens the finished archive and asserts that `manifest.ini`, `runtime/node.exe`, the driver modules and the WASM engine are actually inside it and that no `.zvoice` leaked in. On a `v*` tag it also publishes a GitHub Release, which is why it needs `permissions: contents: write`; the Tests workflow stays read-only.
 
 ### CI Steps (in order)
 
@@ -124,7 +124,7 @@ Before opening a PR, run through this:
 1. **All checks pass locally.** Run the [all-in-one command](#auto-fix-and-run-all-checks-recommended) or each step individually — all should be clean.
 2. **No NVDA-specific imports** are added to standalone modules like `speech_processing.py`, `language_detector.py`, `language_profiles.py`, or `unicode_data.py`. Those must remain runnable without NVDA. (CI will catch this with `ModuleNotFoundError` failures.)
 3. **New tests are added** for any new standalone functionality.
-4. **Build succeeds** — run `build.bat` (Windows) or `build.sh` (Linux/macOS) and verify no errors. The first build needs internet access: step 5 of 8 runs `fetch_bun_runtime.py`, which downloads `bun-windows-x64.zip` (~43 MB) and installs `bun.exe` into `googleTtsForNvda/synthDrivers/googleTtsForNvda/runtime/`. It is cached afterwards, and `runtime/` is gitignored so it is never committed. Set `SKIP_BUN_RUNTIME=1` to build without it.
+4. **Build succeeds** — run `build.bat` (Windows) or `build.sh` (Linux/macOS) and verify no errors. The first build needs internet access: step 5 of 8 runs `fetch_node_runtime.py`, which downloads `node-v22.23.3-win-x64.zip` (~34 MB) and installs `node.exe` into `googleTtsForNvda/synthDrivers/googleTtsForNvda/runtime/`. It is cached afterwards, and `runtime/` is gitignored so it is never committed. Set `SKIP_NODE_RUNTIME=1` to build without it.
 5. **Code matches the existing style.** Ruff handles most of this, but also check naming conventions, docstrings, and comment style against nearby code.
 6. **User-facing strings use `_()` for translation** where applicable in NVDA UI code.
 7. **Hands-on testing performed.** Install and test the built add-on in a live NVDA session before submitting. Do not submit AI-generated code without testing it yourself.
@@ -161,10 +161,10 @@ Before opening a PR, run through this:
 The unit tests stub the runtime transport, so they cannot prove the engine actually speaks. After building, drive the real chain with:
 
 ```powershell
-python tests\check_bun_runtime.py --zvoice path\to\en-us-x-multi.zvoice --out speech.wav
+python tests\check_node_runtime.py --zvoice path\to\en-us-x-multi.zvoice --out speech.wav
 ```
 
-It exercises `WasmTtsEngineBridge` -> `BunClient` -> the `bun.exe` subprocess -> `bunRuntime/worker.js` -> `web/bridgeHarness.js` -> `bindings_main.wasm`, prints time-to-first-audio for a cold and a warm utterance, writes a WAV you can listen to, and exits non-zero on failure. Set `GTTS_BUN_PATH` to test against a specific Bun executable. Full manual release testing, including the no-browser and antivirus cases, is in [`tests/NVDA_CHROMIUM_MANUAL_CHECKLIST.md`](NVDA_CHROMIUM_MANUAL_CHECKLIST.md).
+It exercises `WasmTtsEngineBridge` -> `NodeClient` -> the `node.exe` subprocess -> `nodeRuntime/worker.js` -> `web/bridgeHarness.js` -> `bindings_main.wasm`, prints time-to-first-audio for a cold and a warm utterance, writes a WAV you can listen to, and exits non-zero on failure. Set `GTTS_NODE_PATH` to test against a specific Node executable. Full manual release testing, including the no-browser and antivirus cases, is in [`tests/NVDA_CHROMIUM_MANUAL_CHECKLIST.md`](NVDA_CHROMIUM_MANUAL_CHECKLIST.md).
 
 ---
 

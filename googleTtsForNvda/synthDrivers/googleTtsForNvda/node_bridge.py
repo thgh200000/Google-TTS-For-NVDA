@@ -1,6 +1,6 @@
-"""Bundled Bun speech runtime: process lifecycle and CDP-shaped IPC.
+"""Bundled Node.js speech runtime: process lifecycle and CDP-shaped IPC.
 
-This module lets the add-on drive Google's WASM TTS engine through a bundled Bun
+This module lets the add-on drive Google's WASM TTS engine through a bundled Node
 executable instead of a headless Chromium browser. It deliberately presents the
 same duck-typed surface as :class:`bridge.BrowserProcessManager` and
 :class:`bridge.CdpClient`, so :class:`bridge.ChromeTtsBridge` and the whole of
@@ -10,18 +10,32 @@ runtimes. Only ``ChromeTtsBridge.__init__`` decides which pair to construct.
 
 Two things make that possible:
 
-* ``bunRuntime/worker.js`` reuses ``web/bridgeHarness.js`` unchanged, so the
+* ``nodeRuntime/worker.js`` reuses ``web/bridgeHarness.js`` unchanged, so the
   engine is driven through the same ``window.googleTtsForNvda*`` entry points and
   the same session-token/packet-sizing/DSP behaviour as in the browser.
 * The worker emits ``{"method": "Runtime.bindingCalled", "params": {"name": ...,
   "payload": ...}}`` envelopes on stdout, byte-for-byte the shape
   ``WasmTtsEngineBridge.handle_event()`` already consumes.
 
+Why Node rather than another JavaScript host: ``bindings_main.js`` is Emscripten
+output whose ``ENVIRONMENT_IS_NODE`` path is the one this engine actually exercises,
+and Node satisfies it exactly. Emscripten sets ``globalThis.Worker =
+worker_threads.Worker`` there, so the pthread pool gets a Worker with ``.on()`` and
+``.unref()``; Node defines no global ``postMessage`` inside a worker, so Emscripten
+installs its own ``parentPort`` -> ``globalThis.onmessage`` bridge; and the
+self-boot test at the tail of ``bindings_main.js`` keys off
+``worker_threads.workerData``, which Emscripten itself supplies. The net effect is
+that the pthread workers run the **real, unmodified** ``bindings_main.js`` -- there
+is no generated worker entry, no Worker redirection and no message bridge to
+maintain. Only ``shim.js`` is needed, for the two things Node genuinely lacks:
+``indexedDB`` (Emscripten's IDBFS cache) and a document base URL for the engine's
+relative ``fetch()`` calls.
+
 What disappears relative to the browser path: browser discovery and registry
 scans, user-data/profile directories and their lock contention, the
 ``DevToolsActivePort`` handshake, the local HTTP server and its COOP/COEP
 headers, the WebSocket transport (and the vendored ``websocketClientRepo``),
-window hiding, and process-priority elevation.
+window hiding, and process-priority elevation for a browser tree.
 """
 
 from __future__ import annotations
@@ -54,7 +68,7 @@ except Exception:  # pragma: no cover - used by the standalone tests.
         return message
 
 
-from . import bun_bootstrap, voice_store
+from . import node_bootstrap, voice_store
 from .bridge import (
     BINDING_NAME,
     SAMPLE_RATE,
@@ -70,12 +84,12 @@ from .catalog import VoiceCatalog
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = BASE_DIR / "runtime"
-BUN_RUNTIME = "bun"
-BUN_RUNTIME_LABEL = "Bundled runtime (no browser)"
-BUN_PATH_ENV_VAR = "GTTS_BUN_PATH"
-BUN_EXECUTABLE_NAMES = ("bun.exe", "bun")
-# Placeholder handed to BunClient.connect(); the Bun runtime has no WebSocket URL.
-BUN_CONNECTION_URL = "bun://googleTtsForNvda"
+BUNDLED_RUNTIME = "bundled"
+BUNDLED_RUNTIME_LABEL = "Bundled runtime (no browser)"
+NODE_PATH_ENV_VAR = "GTTS_NODE_PATH"
+NODE_EXECUTABLE_NAMES = ("node.exe", "node")
+# Placeholder handed to NodeClient.connect(); the bundled runtime has no WebSocket URL.
+BUNDLED_CONNECTION_URL = "bundled://googleTtsForNvda"
 STARTUP_GRACE_SECONDS = 2.0
 READY_LINE_POLL_SECONDS = 0.01
 STOP_GRACE_SECONDS = 2.0
@@ -92,30 +106,30 @@ _CALL_PATTERN = re.compile(
 
 
 def runtime_dir() -> Path:
-    """Directory the build places ``bun.exe`` in."""
+    """Directory the build places ``node.exe`` in."""
     return RUNTIME_DIR
 
 
-def bun_candidates() -> tuple[str, ...]:
+def node_candidates() -> tuple[str, ...]:
     """Executable candidates in priority order.
 
-    ``GTTS_BUN_PATH`` mirrors the existing ``CHROME_PATH``/``EDGE_PATH``/
+    ``GTTS_NODE_PATH`` mirrors the existing ``CHROME_PATH``/``EDGE_PATH``/
     ``BRAVE_PATH`` convention for portable or custom installations.
     """
     candidates: list[str] = []
-    override = os.environ.get(BUN_PATH_ENV_VAR, "").strip().strip('"')
+    override = os.environ.get(NODE_PATH_ENV_VAR, "").strip().strip('"')
     if override:
         candidates.append(override)
-    for name in BUN_EXECUTABLE_NAMES:
+    for name in NODE_EXECUTABLE_NAMES:
         candidates.append(str(RUNTIME_DIR / name))
     return tuple(candidates)
 
 
-def find_bun() -> str | None:
-    """Return the first existing Bun executable, or ``None``.
+def find_node() -> str | None:
+    """Return the first existing Node executable, or ``None``.
 
-    Returns ``None`` on 32-bit Windows regardless of what is on disk: Bun publishes
-    no 32-bit Windows build, so a bundled ``bun.exe`` there would be found by
+    Returns ``None`` on 32-bit Windows regardless of what is on disk: the add-on
+    bundles the 64-bit Node build only, so a bundled ``node.exe`` there would be found by
     ``os.path.isfile`` yet fail to execute. Reporting it as absent is what lets
     ``bridge.effective_speech_runtime()`` fall back to an installed browser instead
     of failing at spawn time with no fallback (this manager sets
@@ -123,10 +137,10 @@ def find_bun() -> str | None:
     """
     if not _windows_is_64bit():
         return None
-    for candidate in bun_candidates():
+    for candidate in node_candidates():
         if candidate and os.path.isfile(candidate):
             return candidate
-    for name in BUN_EXECUTABLE_NAMES:
+    for name in NODE_EXECUTABLE_NAMES:
         resolved = _which(name)
         if resolved:
             return resolved
@@ -139,8 +153,8 @@ def _which(name: str) -> str | None:
     return shutil.which(name)
 
 
-def bun_runtime_available() -> bool:
-    return find_bun() is not None
+def node_runtime_available() -> bool:
+    return find_node() is not None
 
 
 def _extract_json_argument(expression: str, payload: str) -> dict[str, Any]:
@@ -184,8 +198,8 @@ def classify_expression(expression: str) -> tuple[str, dict[str, Any] | None]:
     )
 
 
-class BunProcessManager:
-    """Spawns and supervises the bundled Bun worker.
+class NodeProcessManager:
+    """Spawns and supervises the bundled Node worker.
 
     Duck-compatible with :class:`bridge.BrowserProcessManager` for everything
     ``ChromeTtsBridge`` touches.
@@ -248,10 +262,9 @@ class BunProcessManager:
         environment = dict(os.environ)
         environment.update(
             {
-                "GTTS_ENGINE_DIR": str(bun_bootstrap.ENGINE_DIR),
-                "GTTS_WEB_DIR": str(bun_bootstrap.BASE_DIR / "web"),
+                "GTTS_ENGINE_DIR": str(node_bootstrap.ENGINE_DIR),
+                "GTTS_WEB_DIR": str(node_bootstrap.BASE_DIR / "web"),
                 "GTTS_MAIN_ENTRY": str(bootstrap["main"]),
-                "GTTS_PTHREAD_ENTRY": str(bootstrap["pthread"]),
                 "GTTS_VOICE_DIR": str(voice_store.voice_dir()),
                 "GTTS_VOICES_JSON": str(voicesPath),
                 "GTTS_BINDING_NAME": BINDING_NAME,
@@ -269,25 +282,25 @@ class BunProcessManager:
         _raise_if_cancelled(cancelEvent)
         with self._lock:
             if self._process is not None and self._process.poll() is None:
-                return BUN_CONNECTION_URL
-        bunPath = find_bun()
-        if bunPath is None:
+                return BUNDLED_CONNECTION_URL
+        nodePath = find_node()
+        if nodePath is None:
             raise _friendly_cdp_error(
                 _(
                     "The bundled Google TTS speech runtime was not found. "
-                    "Reinstall Google TTS For NVDA, or set GTTS_BUN_PATH to a Bun executable."
+                    "Reinstall Google TTS For NVDA, or set GTTS_NODE_PATH to a Node executable."
                 ),
-                f"No Bun executable found. Searched: {', '.join(bun_candidates())}",
+                f"No Node executable found. Searched: {', '.join(node_candidates())}",
             )
         try:
-            bootstrap = bun_bootstrap.generate()
-        except bun_bootstrap.BunBootstrapError as exc:
+            bootstrap = node_bootstrap.generate()
+        except node_bootstrap.NodeBootstrapError as exc:
             raise _friendly_cdp_error(
                 _("Google TTS For NVDA could not prepare the bundled speech runtime."),
                 str(exc),
             ) from exc
         voicesPath = self.write_runtime_voices_json()
-        args = [bunPath, "run", str(bootstrap["worker"])]
+        args = [nodePath, str(bootstrap["worker"])]
         _raise_if_cancelled(cancelEvent)
         try:
             process = subprocess.Popen(
@@ -302,12 +315,12 @@ class BunProcessManager:
         except OSError as exc:
             raise _friendly_cdp_error(
                 _("Google TTS For NVDA could not start the bundled speech runtime."),
-                f"Failed to execute {bunPath}: {exc}",
+                f"Failed to execute {nodePath}: {exc}",
             ) from exc
         with self._lock:
             self._process = process
             self._bootstrap = bootstrap
-            self._profileRuntime = BUN_RUNTIME
+            self._profileRuntime = BUNDLED_RUNTIME
         # Fail fast on an immediately-dying runtime instead of letting
         # wait_until_ready() poll for four seconds first.
         deadline = time.monotonic() + STARTUP_GRACE_SECONDS
@@ -316,18 +329,18 @@ class BunProcessManager:
             if process.poll() is not None:
                 raise _friendly_cdp_error(
                     _("Google TTS For NVDA could not start the bundled speech runtime."),
-                    f"Bun exited immediately with code {process.returncode}.",
+                    f"Node exited immediately with code {process.returncode}.",
                 )
             time.sleep(READY_LINE_POLL_SECONDS)
         # The Chromium path elevates its browser for the same reason: the WASM engine
         # pumps audio from a setTimeout chain, and a starved or power-throttled process
         # stalls that pump long enough for the harness to think the utterance drained.
-        # Bun gets no scheduler or power-throttling concessions by default, so ask for
+        # Node gets no scheduler or power-throttling concessions by default, so ask for
         # them explicitly. Despite the name this helper is runtime-agnostic: it only
         # calls SetPriorityClass and disables PROCESS_POWER_THROTTLING_EXECUTION_SPEED.
         _elevate_chrome_priority(process.pid)
-        log.debug("Google TTS bundled speech runtime started (pid %d, %s).", process.pid, bunPath)
-        return BUN_CONNECTION_URL
+        log.debug("Google TTS bundled speech runtime started (pid %d, %s).", process.pid, nodePath)
+        return BUNDLED_CONNECTION_URL
 
     def terminate(self) -> None:
         with self._lock:
@@ -351,10 +364,10 @@ class BunProcessManager:
                     stream.close()
 
 
-class BunClient:
+class NodeClient:
     """Line-oriented IPC client presenting the :class:`bridge.CdpClient` surface."""
 
-    def __init__(self, processManager: BunProcessManager) -> None:
+    def __init__(self, processManager: NodeProcessManager) -> None:
         self._processManager = processManager
         self._lock = threading.RLock()
         self._sendLock = threading.Lock()
@@ -396,7 +409,7 @@ class BunClient:
         if process is None:
             raise _friendly_cdp_error(
                 _("Google TTS For NVDA is not connected to the bundled speech runtime."),
-                "Bun worker process is not running.",
+                "Node worker process is not running.",
             )
         with self._lock:
             self.close_locked()
@@ -404,7 +417,7 @@ class BunClient:
             self._connected = True
             self._stopped.clear()
             self._readerThread = threading.Thread(
-                name="googleTtsForNvda.bunReader",
+                name="googleTtsForNvda.nodeReader",
                 target=self._reader_loop,
                 daemon=True,
             )
@@ -437,7 +450,7 @@ class BunClient:
         if process is None or process.poll() is not None or process.stdin is None:
             raise _friendly_cdp_error(
                 _("Google TTS For NVDA is not connected to the bundled speech runtime."),
-                "Bun worker stdin is unavailable.",
+                "Node worker stdin is unavailable.",
             )
         payload = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
         with self._sendLock:
@@ -610,7 +623,7 @@ class BunClient:
         if not self.is_connected():
             raise _friendly_cdp_error(
                 _("Google TTS For NVDA is not connected to the bundled speech runtime."),
-                "Bun worker is not running.",
+                "Node worker is not running.",
             )
         with self._lock:
             loadError = self._loadError
@@ -680,7 +693,7 @@ class BunClient:
                 raise CdpCancelled()
             raise _friendly_cdp_error(
                 _("The bundled speech runtime connection closed unexpectedly."),
-                "Bun worker stdout closed.",
+                "Node worker stdout closed.",
             )
         if not response.get("ok", True):
             detail = str(response.get("error") or "Bundled speech runtime reported a failure.")
@@ -710,5 +723,5 @@ class BunClient:
 
 
 def bundled_runtime_sample_rate() -> int:
-    """Sample rate the Bun runtime emits; kept next to ``bridge.SAMPLE_RATE``."""
+    """Sample rate the Node runtime emits; kept next to ``bridge.SAMPLE_RATE``."""
     return SAMPLE_RATE

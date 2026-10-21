@@ -5,7 +5,7 @@ reliably, that audio is clean and level, or that NVDA announces dynamic controls
 correctly. Run this checklist on a real installed add-on. Leave every box
 unchecked until that test has actually been performed.
 
-Four runtimes are selectable: the **bundled runtime** (`runtime/bun.exe`, the
+Four runtimes are selectable: the **bundled runtime** (`runtime/node.exe`, the
 default) and the three Chromium browsers. Cover the bundled runtime first; the
 browser items apply only when a Chromium runtime is selected.
 
@@ -21,7 +21,7 @@ Also record the NVDA architecture (x86/x64) and whether Windows is 64-bit, since
 the bundled runtime is a 64-bit process; whether Edge WebView2 Runtime is
 installed; whether automatic language profiles are enabled; and relevant NVDA
 log/audio captures. For the bundled runtime, record the version reported by
-`runtime/bun_version.json`.
+`runtime/node_version.json`.
 
 ## 1. Synth loading and runtime/WASM startup
 
@@ -33,15 +33,15 @@ log/audio captures. For the bundled runtime, record the version reported by
 - [ ] Verify **Keep Google TTS speech runtime ready** both off and on.
 - [ ] Verify no console window flashes at NVDA startup or during speech.
 - [ ] Verify cancellation while speaking: interrupt mid-utterance repeatedly and confirm speech stops promptly with no leaked or trailing audio.
-- [ ] Interrupt and immediately speak again (repeated `NVDA+f12`, or arrow keys while reading), and confirm the *following* utterance is complete — no missing final word. With debug logging on, `bun_bridge` logs `audio accounting agrees: N packets, M samples`; a line saying `audio accounting mismatch` means audio was lost between the runtime and NVDA rather than never being synthesised.
+- [ ] Interrupt and immediately speak again (repeated `NVDA+f12`, or arrow keys while reading), and confirm the *following* utterance is complete — no missing final word. With debug logging on, `node_bridge` logs `audio accounting agrees: N packets, M samples`; a line saying `audio accounting mismatch` means audio was lost between the runtime and NVDA rather than never being synthesised.
 - [ ] Read a long paragraph and a date/number-heavy paragraph end to end and confirm nothing is cut off at the end. `tests/check_interrupt_truncation.py` stress-tests the interrupt path offline.
 - [ ] Repeatedly re-read the *same* short text (for example a date) and confirm every rendition is the same length. Differing lengths for identical input mean the harness declared the utterance drained while the engine was still producing audio; raise `GTTS_DRAIN_IDLE_MS` and retest. `tests/check_synthesis_variance.py` measures this offline.
 - [ ] Read under load (SayAll on a long document with other add-ons active) and confirm no sentence loses its final word. Record whether raising the runtime process priority was enough or whether `GTTS_DRAIN_IDLE_MS` also had to be raised.
 - [ ] Verify the sign-in screen / secure desktop behaviour and record it; do not assume it works.
-- [ ] Verify antivirus and Windows SmartScreen do not quarantine or block `runtime/bun.exe`, and that the add-on is signed/trusted as expected.
-- [ ] Terminate `bun.exe` from Task Manager while NVDA is idle, then speak; verify recovery without a stale process.
-- [ ] Set `GTTS_BUN_PATH` to a valid Bun executable and verify it is used; set it to an invalid path and verify the diagnostic and fallback.
-- [ ] Delete `runtime/bun.exe` and verify the bundled-runtime error message, then verify fallback to an installed browser when one exists.
+- [ ] Verify antivirus and Windows SmartScreen do not quarantine or block `runtime/node.exe`, and that the add-on is signed/trusted as expected.
+- [ ] Terminate `node.exe` from Task Manager while NVDA is idle, then speak; verify recovery without a stale process.
+- [ ] Set `GTTS_NODE_PATH` to a valid Node executable and verify it is used; set it to an invalid path and verify the diagnostic and fallback.
+- [ ] Delete `runtime/node.exe` and verify the bundled-runtime error message, then verify fallback to an installed browser when one exists.
 - [ ] On 32-bit (x86) NVDA over 64-bit Windows, verify the bundled runtime still works.
 - [ ] Verify peak memory of the runtime process over a long SayAll session and compare against the recycle thresholds.
 
